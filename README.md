@@ -3,4 +3,4 @@
 Materiel du cours.
 
 
-1. Introduction. [a relative link](1. Introduction/1. Brief Introduction to R and Descriptive Analysis of the Dataset.md)
+1. Introduction. [a relative link](1.%20Introduction/1.%20Brief%20Introduction%20to%20R%20and%20Descriptive%20Analysis%20of%20the%20Dataset.md)
