@@ -18,7 +18,7 @@ You are located in the directory containing environment.yml from this repo:
 `conda env create -f environment.yml`
 An environment called `lactu2110` will be created.
 
-Then, you can launch jupyter notebook with
+Then, you can activate the environment with `conda activate lactu2110` and launch jupyter notebook with
 `jupyter notebook`
 
 ### Long version
