@@ -14,15 +14,17 @@ if (!require("rpart.plot")) install.packages("rpart.plot")
 if (!require("arrow")) install.packages("arrow")
 if (!require("caret")) install.packages("caret")
 if (!require("ggplot2")) install.packages("ggplot2")
+if (!require("rattle")) install.packages("rattle")
+
 
 require("rpart")
 require("rpart.plot")
 require("arrow")
 require("caret")
 require("ggplot2")
+require("rattle")
 
-
-options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150)
+options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
 ```
 
 ```{r}
@@ -39,7 +41,7 @@ The package *caret* provides a lot of helpful functions. One of them is *createD
 
 ```{r}
 set.seed(21)
-in_training = createDataPartition(dataset$ClaimNb, times = 1, p = 0.8, list = FALSE)
+in_training = createDataPartition(y = dataset$ClaimNb, times = 1, p = 0.8, list = FALSE)
 training_set = dataset[in_training, ]
 testing_set = dataset[-in_training, ]
 ```
@@ -48,7 +50,7 @@ Let us check the distribution of the variable *ClaimNb* among these two groups.
 
 ```{r}
 temp = dataset
-temp$training = 0
+temp$training = NA
 temp[in_training, "in_train_set"] = 1
 temp[-in_training, "in_train_set"] = 0
 
@@ -96,6 +98,13 @@ rpart.plot(m0_rpart,
            digits = 3)
 ```
 
+```{r}
+# Or using the rattle package
+
+fancyRpartPlot(m0_rpart, split.col="black",nn.col="black", 
+               caption="", digits=2)
+```
+
 If the tree is too large, we will probably have some overfitting. To prevent overfitting, we can play with the complexity parameter cp. A good approach is to compute the whole tree, without any penalty (i.e. complexity parameter is set to 0) and afterwards prune to tree.
 
 ```{r}
@@ -127,7 +136,7 @@ rpart.plot(m0_rpart)
 
 Playing around with the complexity parameter will yield sub-trees of the fully developped tree (i.e. the one with cp = 0).
 
-We check verify on one example that increasing the complexity parameter *cp* will only prune the tree differently and that by increasing *cp*, we will obtain a subtree. The common parts of the three trees below (i.e., the first split) are identical.
+We check on one example that increasing the complexity parameter *cp* will only prune the tree differently and that by increasing *cp*, we will obtain a **subtree**. The common parts of the three trees below (i.e., the first split) are identical.
 
 ```{r}
 tree1 = rpart(cbind(Exposure, ClaimNb) ~ DriverAge + CarAge, 
@@ -199,14 +208,14 @@ head(m0_rpart$cptable, 10)
 Let us see the optimal tree.
 
 ```{r}
-cp_star = m0_rpart$cptable[which.min(m0_rpart$cptable[, 4]), 1]
+cp_star = m0_rpart$cptable[which.min(m0_rpart$cptable[,"xerror"]), "CP"]
 print(cp_star)
 
 rpart.plot(prune(m0_rpart, cp = cp_star), type = 5, extra = 101, under = FALSE, fallen.leaves = FALSE,
     digits = 3)
 ```
 
-Using the 1-SE error, we need to compute the greatest cp parameters that enters the 1-SE window
+Using the 1-SE error rule, we need to compute the greatest cp parameters that enters the 1-SE window
 
 ```{r}
 SE = m0_rpart$cptable[which.min(m0_rpart$cptable[, 4]), 5]
