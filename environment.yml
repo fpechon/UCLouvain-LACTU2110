@@ -4,3 +4,4 @@ dependencies:
   - r-base
   - jupyter
   - r-irkernel
+  - r-rmarkdown
