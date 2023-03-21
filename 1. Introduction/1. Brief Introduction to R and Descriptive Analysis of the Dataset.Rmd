@@ -32,6 +32,7 @@ if (!require("scales")) install.packages("scales")
 if (!require("broom")) install.packages("broom")
 if (!require("stringi")) install.packages("stringi")
 if (!require("arrow")) install.packages("arrow")
+if (!require("patchwork")) install.packages("patchwork")
 
 
 require("CASdatasets")
@@ -50,7 +51,8 @@ require("maptools")
 require("scales")
 require("broom")
 require("stringi")
-require("arrow");
+require("arrow")
+require("patchwork");
 ```
 
 In this jupyter notebook, we will use the following options to set the width and height of our plots.
@@ -157,6 +159,10 @@ It appears that in this dataset the variable *PolicyID* is a **factor**. A facto
 
 To remove unused levels, we can use on the function **droplevels**.
 
+```{r}
+dataset$PolicyID = droplevels(dataset$PolicyID)
+```
+
 ### Exposure in month
 The Exposure reveals the fraction of the year during which the policyholder is in the portfolio. 
 We can compute the total exposure by summing the policyholders' exposures. 
@@ -194,7 +200,7 @@ What if we also want to show the percentage on the bars ?
 
 ```{r}
 ggplot(dataset, aes(x=cut(Exposure, breaks = seq(from = 0, to = 1,by = 1/12), labels = 1:12), 
-                    label = scales::percent(prop.table(stat(count)), accuracy = 0.1)))+
+                    label = scales::percent(prop.table(after_stat(count)), accuracy = 0.1)))+
   geom_bar() + 
   geom_text(stat = 'count',
             vjust = -0.5,
@@ -248,6 +254,7 @@ We can see the different **levels** of a **factor** by using the function *level
 levels(dataset$Power)
 ```
 
+We can see the number of observations in each level of the variable, by using the function *table*.
 
 ```{r}
 table(dataset$Power)
@@ -266,16 +273,17 @@ Power.summary
 We can show this on a plot as well:
 
 ```{r}
-ggplot(Power.summary, aes(x=Power, 
+plot_power_expo = ggplot(Power.summary, aes(x=Power, 
                           y=totalExposure, 
                           fill=Power, 
                           color=Power, 
                           label=scales::number(totalExposure))) + 
   geom_bar(stat="identity")+
   geom_text(stat='identity',  vjust=-0.5)+
-  scale_y_continuous(name = "Exposure in years", labels = scales::number)+
+  scale_y_continuous(name = "Exposure in years", labels = scales::number, expand = expansion(mult = c(0, .15)))+
   scale_colour_discrete(guide = "none")+
   scale_fill_discrete(guide="none")
+plot_power_expo
 ```
 
 Let us now look at the observed claim frequency in each level
@@ -295,21 +303,30 @@ portfolio.cf = sum(dataset$ClaimNb)/ sum(dataset$Exposure)
 # Can also be written as
 portfolio.cf = with(dataset, sum(ClaimNb)/sum(Exposure))
 
-ggplot(Power.summary, aes(x=Power, 
+plot_power_claimfreq = ggplot(Power.summary, aes(x=Power, 
                           y=Obs.Claim.Frequency,
                           color=Obs.Claim.Frequency,
                           fill=Obs.Claim.Frequency,
                           label = percent(Obs.Claim.Frequency, accuracy = 0.01))) + 
   geom_bar(stat='identity') + 
-  geom_hline(aes(yintercept=portfolio.cf), color="black", size= 2, linetype="dashed", alpha = 0.33) +
+  geom_hline(aes(yintercept=portfolio.cf), color="black", linewidth = 2, linetype="dashed", alpha = 0.33) +
   geom_label(vjust=-0.21, fill="white", alpha = 0.25)+
   annotate(geom="text", 
            x='m', y=portfolio.cf, 
            vjust=-0.5, 
            label=paste("Average claim freq. of portfolio: ", percent(portfolio.cf, accuracy = 0.01)), 
            color="black")+
-  scale_y_continuous(name = "Observed Claim Frequency", labels = percent_format(accuracy = 0.01))+
+  scale_y_continuous(name = "Observed Claim Frequency", labels = percent_format(accuracy = 0.01), 
+                    expand = expansion(mult = c(0, .15)))+
   theme(legend.position = 'none')
+plot_power_claimfreq
+```
+
+With the package **patchwork** it is "ridiculously easy" (not my words :-) ) to combine separate ggplots.
+See below and see https://patchwork.data-imaginist.com/
+
+```{r}
+plot_power_expo / plot_power_claimfreq
 ```
 
 ### CarAge
@@ -351,7 +368,9 @@ ggplot(CarAge.summary, aes(x=CarAge,
   geom_bar(stat="identity")+
   geom_text(stat='identity', color="black", hjust=0.25, vjust=0.5,  angle=45, check_overlap=TRUE)+
   scale_x_continuous(breaks = seq(0,100,5))+
-  scale_y_continuous(name = "Exposure in years", labels = label_number())+
+  scale_y_continuous(name = "Exposure in years", 
+                     labels = label_number(), 
+                     expand = expansion(add = c(1000, 0), mult = c(0, .15)))+
   theme(legend.position = 'none')
 ```
 
@@ -377,7 +396,7 @@ ggplot(CarAge.summary, aes(x=CarAge,
                           y=Obs.Claim.Freq,
                           label = percent(Obs.Claim.Freq, accuracy = 0.01))) + 
   geom_point() + geom_line()+
-  geom_hline(yintercept=portfolio.cf, color="black", size= 2, linetype="dashed", alpha = 0.33) +
+  geom_hline(yintercept=portfolio.cf, color="black", linewidth = 2, linetype="dashed", alpha = 0.33) +
     annotate(geom="text", 
            x=20, y=portfolio.cf, 
            vjust=-0.5, 
@@ -442,7 +461,9 @@ ggplot(Brand.summary, aes(x=reorder(Brand,totalExposure),
   geom_bar(stat='identity') +
   coord_flip()+guides(fill='none')+
   scale_x_discrete(name = "") + 
-  scale_y_continuous("Exposure in years", labels = label_number(), expand = c(0.10, 0))+
+  scale_y_continuous("Exposure in years", 
+                     labels = label_number(), 
+                     expand = expansion(mult = c(0, 0.10)))+
   geom_label()
 ```
 
@@ -455,9 +476,10 @@ ggplot(Brand.summary, aes(x=reorder(Brand,Obs.Claim.Freq),
                           label = percent(Obs.Claim.Freq, accuracy=0.1))) +
   geom_bar(stat='identity') +
   geom_label(hjust=+1.2)+
-  coord_flip()+guides(fill='none')+ ggtitle("Observed Claim Frequencies by Brand of the car")+
+  coord_flip()+guides(fill='none')+ 
+  ggtitle("Observed Claim Frequencies by Brand of the car")+
   scale_x_discrete(name = "Brand") + 
-  scale_y_continuous("Observed claim Frequency", labels = percent)
+  scale_y_continuous("Observed claim Frequency", labels = label_percent(accuracy = 0.1))
 ```
 
 ### Gas
@@ -478,7 +500,7 @@ ggplot(Gas.summary, aes(x=Gas, y=totalExposure, fill=Gas, label = number(totalEx
   geom_label()+
   guides(fill='none')+
   scale_x_discrete(name = "Fuel")+
-  scale_y_continuous(name='Total Exposure (in years)', labels = number)
+  scale_y_continuous(name='Total Exposure (in years)', labels = label_number())
 ```
 
 There seems to be a similar amount of Diesel and Regular gas vehicles in the portfolio.
@@ -492,7 +514,7 @@ ggplot(Gas.summary,
   geom_bar(stat="identity") + 
   geom_label()+  guides(fill='none')+
   scale_x_discrete(name = "Fuel") + 
-  scale_y_continuous("Observed claim Frequency", labels = percent)
+  scale_y_continuous("Observed claim Frequency", labels = label_percent())
 ```
 
 ### Region
@@ -541,8 +563,8 @@ area$id <- row.names(area)
 area_tidy2 <- area_tidy %>% full_join(area@data, by="id")
 
 # Because of accents ...
-area_tidy2$NAME_1 = stri_trans_general(str = area_tidy2$NAME_1, 
-                   id = "Latin-ASCII")
+area_tidy2$NAME_1 = stri_trans_general(str = area_tidy2$NAME_1,
+                                       id = "Latin-ASCII")
 
 # Which computed data do we want ?
 data_to_add = Region.summary[,c("Region", "totalExposure", "Obs.Claim.Freq")]
@@ -567,8 +589,8 @@ p2 = ggplot(area_tidy2, aes(long, lat, group=group, fill = log(totalExposure))) 
 xlab("Longitude") + ylab("Latitude") + theme_void()
 
 
-# Show them next to each other
-gridExtra::grid.arrange(p1, p2, ncol=2)
+# Show them next to each other: Very easy using patchwork package
+p1 + p2
 ```
 
 ### Density
@@ -594,7 +616,8 @@ Density.summary = dataset %>% group_by(Density) %>%
                                 Number.Observations = length(Exposure), 
                                 Number.Claims = sum(ClaimNb), 
                                 Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
-ggplot(Density.summary, aes(x=Density, y=Obs.Claim.Freq)) + geom_point()
+ggplot(Density.summary, aes(x=Density, y=Obs.Claim.Freq)) + 
+  geom_point()
 ```
 
 ... but realize it is impossible to see a trend. One way out is to categorize the variable. We will see later (GAM) that it is possible to estimate a smooth function, which avoid the arbitrary categorization.
@@ -604,8 +627,8 @@ We can categorize the variable using the function *cut*.
 ```{r}
 dataset$DensityCAT = cut(dataset$Density, breaks = quantile(dataset$Density, probs = seq(from = 0, to = 1, by=0.1)),
                          include.lowest = TRUE)
-table(dataset$DensityCAT)
 levels(dataset$DensityCAT) <- LETTERS[1:10]
+table(dataset$DensityCAT)
 ```
 
 Then, we can apply the same strategy as above.
@@ -621,11 +644,11 @@ ggplot(Density.summary,
        aes(x=DensityCAT, 
            y=Obs.Claim.Freq, 
            fill=DensityCAT, 
-           label = percent(Obs.Claim.Freq))) + 
+           label = label_percent()(Obs.Claim.Freq))) + 
   geom_bar(stat="identity") + 
   geom_label()+  guides(fill='none')+
   scale_x_discrete(name = "Density") + 
-  scale_y_continuous("Observed claim Frequency", labels = percent)
+  scale_y_continuous("Observed claim Frequency", labels = label_percent(), expand = expansion(mult = c(0, 0.15)))
 ```
 
 ## Interactions
@@ -648,6 +671,8 @@ ggplot(CarAge.Fuel.summary, aes(x=CarAge,
   scale_x_continuous(name = "Age of the Car", breaks=seq(0,100,5))+
   scale_y_continuous(name = "Observed Claim Frequency", labels = percent_format(accuracy = 0.01))+
   theme(legend.position = 'none')
+
+# Warning Message -  Explanation here: https://stackoverflow.com/a/69392954
 ```
 
 ### Fuel and Driver Age
