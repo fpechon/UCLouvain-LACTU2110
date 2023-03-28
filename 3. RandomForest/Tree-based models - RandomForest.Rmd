@@ -4,35 +4,15 @@ title: An R Markdown document converted from "3. RandomForest/Tree-based models 
 output: html_document
 ---
 
-```{r}
-# require("CASdatasets") - Not necessary, as we saved the data as parquet file
-if (!require("rpart")) install.packages("rpart")
-if (!require("rpart.plot")) install.packages("rpart.plot")
-if (!require("arrow")) install.packages("arrow")
-if (!require("caret")) install.packages("caret", dependencies=TRUE)
-if (!require("ggplot2")) install.packages("ggplot2")
-if (!require("rattle")) install.packages("rattle")
-
-
-require("rpart")
-require("rpart.plot")
-require("arrow")
-require("caret")
-require("ggplot2")
-require("rattle")
-
-
-
-options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
-
-start_time <- Sys.time()
-```
-
 # Random Forest on Count Data
 
 Let us first install the random forest package for count data, called **rfCountData**. Note that Rtools is required on Windows.
 
 ```{r}
+options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
+
+start_time <- Sys.time()
+
 # If 401 error, uncomment the following line:
 Sys.unsetenv("GITHUB_PAT")
 if (!require(devtools)) install.packages("devtools")
@@ -106,7 +86,7 @@ In average, we expect more or less 36.788% observations to be OOB (why ?). We ca
 m0_rf$inbag[,1] %>% 
   table() %>% 
   prop.table %>% 
-  round(3)
+  round(5) * 100
 ```
 
 Similarly on tree number 2:
@@ -115,7 +95,7 @@ Similarly on tree number 2:
 m0_rf$inbag[,2] %>% 
   table() %>% 
   prop.table %>% 
-  round(3)
+  round(5) * 100
 ```
 
 At which point has every observation been OOB in at least one bootstrap sample (one tree) ?
@@ -228,7 +208,7 @@ m4_rf = rfPoisson(x = training_set[, c("Power", "CarAge", "DriverAge", "Brand", 
     ntree = 100, nodesize = 2500, mtry = 2, importance = TRUE, do.trace = TRUE)
 ```
 
-When a variable is a factor (not ordered), at each node, the average claim frequency for each level will be computed. Then, the levels will be sorted based on these claim frequencies, and a splitting among these sorted levels will be identified. If a variable a an ordered factor, the splitting point will be done on the ‘natural’ ordering of the levels, similarly to how a numerical variable is split.
+When a variable is a factor (not ordered), at each node, the average claim frequency for each level will be computed. Then, the levels will be sorted based on these claim frequencies, and a splitting among these sorted levels will be identified. If a variable is an ordered factor, the splitting point will be done on the ‘natural’ ordering of the levels, similarly to how a numerical variable is split.
 
 ```{r}
 plot(m4_rf)
