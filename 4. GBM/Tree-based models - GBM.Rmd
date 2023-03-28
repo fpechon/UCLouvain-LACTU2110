@@ -1,0 +1,503 @@
+---
+title: An R Markdown document converted from "4. GBM/Tree-based models - GBM.ipynb"
+output: html_document
+---
+
+# Gradient Boosting Model
+
+## Introduction
+
+We can start by loading the packages.
+
+
+```{r}
+require(devtools)
+Sys.unsetenv("GITHUB_PAT")
+install_github("gbm-developers/gbm3")
+
+library(gbm3)
+library(caret)
+library(mgcv)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(arrow)
+```
+
+We can also load the data (same as in the previous sessions).
+
+```{r}
+dataset = read_parquet(file = "../data/dataset.parquet")
+
+set.seed(21)
+in_training = createDataPartition(dataset$ClaimNb, times = 1, p = 0.8, list = FALSE)
+training_set = dataset[in_training, ]
+testing_set = dataset[-in_training, ]
+```
+
+## R Package GBM3
+
+The gbm3 package is very similar to the package gbm available on CRAN. However, the gbm package is now an orphan, while the gbm3 package is basically an enhanced version of the gbm package and is maintained.
+
+```{r}
+available_distributions()
+```
+
+### Small Example with two variables.
+
+The main function is gbmt.
+
+```{r}
+set.seed(1)
+m0 = gbmt(ClaimNb ~ offset(log(Exposure)) + CarAge + DriverAge,
+         data = training_set,
+         distribution = gbm_dist("Poisson"),
+         train_params = training_params(num_trees = 100,
+                                        shrinkage = 0.01, #Default is 0.001
+                                        interaction_depth = 5,  #the max number of non-terminal nodes in each tree 
+                                        min_num_obs_in_node = 1000,
+                                        bag_fraction = 0.5, # At each tree, only 50% of the data is considered
+                                        num_train = 1*nrow(training_set)), #100% of the training set will be used in the learning process
+         is_verbose = TRUE,
+         keep_gbm_data = TRUE,
+         par_details = gbmParallel(num_threads = 3)) #Parallel computing
+```
+
+We can find the optimal number of trees using gbmt_performance. In this case, since no validation set has been provided, it will be based on out-of-bag samples. Does this make sense ? What is an OOB in the case of a GBM ?
+
+```{r}
+gbmt_performance(m0, method = "OOB")
+```
+
+Sometimes the GBM won’t have enough trees. This can be seen when the optimal number of trees equals to total number of trees. No need to rerun everything, we can just add some new trees.
+
+```{r}
+set.seed(2)
+m1 = gbm_more(m0, num_new_trees = 400, is_verbose = TRUE)
+```
+
+We can check the optimal number of trees based on the out-of-bag observations.
+
+```{r}
+gbmt_performance(m1, method="OOB")
+```
+
+**However, since OOB does not make much sense for GBM (due to the sequential nature of the algorithm), one should rather rely on cross-validation to find the optimal number of boosting iterations.**
+
+```{r}
+set.seed(1)
+m0 = gbmt(ClaimNb ~ offset(log(Exposure)) + CarAge + DriverAge,
+         data = training_set,
+         distribution = gbm_dist("Poisson"),
+         train_params = training_params(num_trees = 400,
+                                        shrinkage = 0.01, # Default is 0.001
+                                        interaction_depth = 5,  #the max number of non-terminal nodes in each tree 
+                                        min_num_obs_in_node = 1000,
+                                        bag_fraction = 0.5,
+                                        num_train = 1*nrow(training_set)),
+         is_verbose = TRUE,
+         keep_gbm_data = TRUE,
+         cv_folds = 5,
+         par_details = gbmParallel(num_threads = 3)) #Parallel computing, depends on your CPU
+```
+
+Here, with cv, unfortunately, we cannot add more trees. We can plot the deviance as a function of the number of trees: a "maximalist" approach should be preferred. We can still prune the GBM, but not add extra boosting steps.
+
+
+```{r}
+plot(gbmt_performance(m0, method = "cv"))
+```
+
+To get the numerical value,
+
+```{r}
+best_iter = gbmt_performance(m0, method = "cv")
+best_iter
+```
+
+The cross-validation error for the optimal iteration can be retrieved.
+
+```{r}
+m0$cv_error[gbmt_performance(m0, method="cv")]
+```
+
+We also have a variable importance metric. For GBMs, importance depends on whether that variable was selected to split on during the tree building process, and how much the loss function (over all trees) improved (decreased) as a result.
+
+```{r}
+summary(m0, num_trees = best_iter)
+```
+
+We can plot the partial dependencies of the variables.
+
+```{r}
+par(mfrow = c(2, 1))
+plot(m0, var_index = 1, num_trees = best_iter, type = "response")
+plot(m0, var_index = 2, num_trees = best_iter, type = "response")
+```
+
+When we are finished, we can evaluate the performance of the model on the testing set.
+
+```{r}
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb, log = TRUE)) -
+    sum(dpois(x = testing_set$ClaimNb, lambda = predict(m0, 
+                                                        newdata = testing_set,
+                                                        n.trees = best_iter, 
+                                                        type = "response") * testing_set$Exposure, log = TRUE)))
+```
+
+We can take a look at the first tree, using the pretty_gbm_tree function.
+
+```{r}
+pretty_gbm_tree(m0, tree_index =1) %>% 
+  filter(SplitVar != -1) # Only keep non terminal nodes
+```
+
+### Using all variables
+
+Let’s now perform the cross-validation with 1000 trees. (~ 6 minutes). We will only perform this CV for one set of hyperparameters (due to time constraint). Obviously, the idea would be to *loop* on different values for these hyperparameters, and select those that yield the loss error as estimated by cross-validation.
+
+```{r}
+set.seed(89)
+m0_gbm = gbmt(ClaimNb ~ offset(log(Exposure)) + CarAge + DriverAge + Power + Brand + Gas + Region + Density,
+         data = training_set,
+         distribution = gbm_dist("Poisson"),
+         train_params = training_params(num_trees = 1000,
+                                        shrinkage = 0.01, #Default is 0.001
+                                        interaction_depth = 5,  #the max number of non - terminal nodes in each tree 
+                                        min_num_obs_in_node = 1000,
+                                        bag_fraction = 0.5,
+                                        num_train = 1*nrow(training_set)),
+         is_verbose = TRUE,
+         cv_folds = 5,
+         keep_gbm_data = TRUE,
+         par_details = gbmParallel(num_threads = 3)) #Parallel computing
+```
+
+```{r}
+plot(gbmt_performance(m0_gbm), method = "cv")
+```
+
+Let us store the optimal number of iterations.
+
+```{r}
+best_iter = gbmt_performance(m0_gbm, "cv")
+best_iter
+```
+
+We can see the variable importance.
+
+```{r}
+summary(m0_gbm)
+```
+
+We can take a look at the partial dependencies.
+
+```{r}
+par(mfrow = c(2, 4))
+for (i in 1:7) {
+    plot(m0_gbm, var_index = i, num_trees = best_iter, type = "response")
+}
+```
+
+#### Interactions
+
+Let’s compute Friedman’s H statistic for interaction, for all the possible couple of variable.
+Friedman's H statistic allows to identify which variables appear to be in interaction. This is typically a good way to identify interactions for a simpler model, such as a GLM.
+
+```{r}
+var_names = c("CarAge", "DriverAge", "Power", "Brand", "Gas", "Region", "Density")
+
+res = matrix(NA, 7, 7)
+for (i in 1:6) {
+    for (j in (i + 1):7) {
+        res[i, j] = interact(gbm_fit_obj = m0_gbm, data = training_set, var_indices = c(i,
+            j), best_iter)
+    }
+}
+diag(res) = 0
+row.names(res) = var_names
+colnames(res) = row.names(res)
+
+interact_melt <- melt(res, na.rm = TRUE)
+
+ggplot(data = interact_melt, aes(x = Var1, y = Var2, fill = value)) + geom_tile(color = "white") +
+    scale_fill_gradient2(low = "white", mid = "gray", high = "blue", name = "Friedman's\nH-statistic") +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1)) +
+    coord_fixed()
+```
+
+One by one, let us inspect the partial dependencies of the top ranked couple of variables.
+
+```{r}
+plot(m0_gbm, var_index = c(which(var_names == "Gas"), which(var_names == "Power")),
+    num_trees = best_iter, type = "response")  #Power, Gas
+```
+
+```{r}
+plot(m0_gbm, var_index = c(which(var_names == "Gas"), which(var_names == "Region")),
+    num_trees = best_iter, type = "response")  # Gas, Region
+```
+
+```{r}
+plot(m0_gbm, var_index = c(which(var_names == "Brand"), which(var_names == "CarAge")),
+    num_trees = best_iter, type = "response")
+```
+
+```{r}
+plot(m0_gbm, var_index = c(which(var_names == "Power"), which(var_names == "Brand")),
+    num_trees = best_iter, type = "response")  # Gas, Region
+```
+
+```{r}
+plot(m0_gbm, var_index = c(which(var_names == "CarAge"), which(var_names == "DriverAge")),
+    num_trees = best_iter, type = "response")  # Gas, Region
+```
+
+We can check the prediction power of the model on the testing set.
+
+```{r}
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb, log = TRUE)) -
+    sum(dpois(x = testing_set$ClaimNb, lambda = predict(m0_gbm, newdata = testing_set,
+        n.trees = best_iter, type = "response") * testing_set$Exposure, log = TRUE)))
+```
+
+#### Tweaking the model
+
+We would have to tweak the parameters. We should define a grid of parameters and perform cross-validation to choose the optimal parameters. Due to time restriction, we will only show one example, for instance (interaction depth changed from 10 to 5):
+
+```{r}
+set.seed(89)
+m1_gbm = gbmt(ClaimNb ~ offset(log(Exposure)) + CarAge + DriverAge + Power + Brand + Gas + Region + Density,
+         data = training_set,
+         distribution = gbm_dist("Poisson"),
+         train_params = training_params(num_trees = 1000,
+                                        shrinkage = 0.01, #Default is 0.001
+                                        interaction_depth = 10,  #the max number of non-terminal nodes in each tree 
+                                        min_num_obs_in_node = 1000,
+                                        bag_fraction = 0.5,
+                                        num_train = 1*nrow(training_set)),
+         is_verbose = FALSE,
+         cv_folds = 5,
+         par_details = gbmParallel(num_threads = 3)) #Parallel computing
+m1_gbm
+```
+
+We need to identify the optimal number of boosting iterations...
+
+```{r}
+plot(gbmt_performance(m1_gbm, method = "cv"))
+```
+
+Let’s compare both cross-validation errors.
+
+```{r}
+c(min(m0_gbm$cv_error),min(m1_gbm$cv_error))
+```
+
+The difference seems small… however, if we look at the predictions..
+
+```{r}
+require(ggplot2)
+ggplot() + 
+  geom_histogram(aes(x=predict(m0_gbm,newdata = training_set,n.trees=best_iter, type="response") / 
+                       predict(m1_gbm,newdata = training_set,n.trees=best_iter, type="response") -1),
+                 bins=60) + 
+  xlab("Relative Difference") + ggtitle("Relative Difference between both models")
+```
+
+In pratice, this means that two actuaries perfoming prediction modelling on the same data are actually very unlikely to obtain for single policies similar predictions, although they might end up with an overall similar loss.
+
+### Intercept of the GBM
+
+It may be required to correct the “intercept” of a gbm. Indeed, let us take at look at the total expected number of claims and compare it to the observed one. Let us do the same comparison with the GAM from above.
+
+```{r}
+pred = data.frame(gbm = predict(m0_gbm,
+                                newdata = training_set, 
+                                n.trees = best_iter, 
+                                type = "response") * training_set$Exposure)
+
+print(paste(c("GBM predicted ", "GBM  obs"),c(sum(pred$gbm), sum(training_set$ClaimNb))))
+```
+
+GBM tend to underestimate the total number of claims. We could correct the claim frequency with
+
+```{r}
+intercept_correction = sum(training_set$ClaimNb)/sum(pred$gbm)
+intercept_correction
+```
+
+Let us do it, and recompute the error on the testing set, first without correction, then with correction.
+
+```{r}
+# Without correction
+
+2*(sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb,log=TRUE))-
+  sum(dpois(x = testing_set$ClaimNb, lambda = predict(m0_gbm,newdata = testing_set,n.trees=best_iter, type="response") * testing_set$Exposure,
+            log=TRUE)))
+```
+
+```{r}
+# With correction
+
+2*(sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb,log=TRUE))-
+  sum(dpois(x = testing_set$ClaimNb, lambda = intercept_correction * predict(m0_gbm,newdata = testing_set,n.trees=best_iter, type="response") * testing_set$Exposure,
+            log=TRUE)))
+```
+
+## Package LightGBM
+
+Other packages than the original R package GBM (or the improved version GBM3) exist now. We can cite XGBoost, LightGBM and Catboost for instance.
+In the next section, we will investigate LightGBM (https://lightgbm.readthedocs.io/en/latest/index.html)
+
+Lightgbm has originally been developped by Microsoft, is free and open-source. It is usable in many languages such as Python and R. The original algorithm has been adapted with the final objective to be *light* and *fast* (e.g. https://lightgbm.readthedocs.io/en/latest/Features.html#optimization-in-speed-and-memory-usage)
+
+```{r}
+require('lightgbm')
+```
+
+To use LightGBM, we need to create a 'lgb.Dataset' object. Note that the data argument does not accept dataframes. We used data.matrix to convert the dataframe to a matrix. Factors are converted to numbers. We can specify which columns relate to categorical features.
+
+```{r}
+cols = c('CarAge', 'DriverAge', 'Density', 'Power', 'Brand','Gas', 'Region')
+lgb_train = lgb.Dataset(data = data.matrix(training_set[cols]), 
+                        label = training_set$ClaimNb,
+                        categorical_feature = c(4,5,6,7),
+                        init_score = log(training_set$Exposure)
+                       )
+```
+
+We can call the lightgbm function to estimate our model. The list of parameters we can play with is listed on the website (rather than the R documentation which does not list them all): https://lightgbm.readthedocs.io/en/latest/Parameters.html
+
+```{r}
+set.seed(42)
+nrounds = 1000
+lgb_m0 = lgb.cv(
+      data = lgb_train,
+      params = list(
+          learning_rate = 0.1,
+          max_depth = 10,
+          bagging_fraction = 1,
+          feature_fraction = 1,
+          feature_fraction_bynode = 1,
+          monotone_constraints = c(0, 0, 0, 1, 0, 0, 0)
+      ),
+      nrounds = nrounds,
+      verbose = 1L,
+      eval_freq = 1L,
+      objective = "poisson",
+      eval = "poisson",
+      nfold=5
+)
+```
+
+```{r}
+best.iter = lgb_m0$best_iter
+best.iter
+```
+
+```{r}
+best.score = lgb_m0$best_score
+best.score
+```
+
+We can try to tweak the model by changing part of its hyperparameters (again, a gridsearch would be better). Here we are going to search for the optimal max_depth parameter
+
+We could for instance, try to find the optimal max_depth parameter e.g. a range from 2 to 10.
+
+```{r}
+list_hyperparameters = expand.grid(
+    learning_rate = 0.1,
+    max_depth = seq(2,10,1),
+    bagging_fraction = c(0.5, 1),
+    feature_fraction = 1,
+    feature_fraction_bynode = c(0.5,1)
+    score = 0
+    best_iter = 0
+)
+```
+
+```{r}
+row = 1
+list_hyperparameters[row, 'learning_rate']
+```
+
+```{r}
+for (row in seq(nrow(list_hyperparameters))){
+    lgb_m1 = lgb.cv(
+      data = lgb_train,
+      params = list(
+          learning_rate = list_hyperparameters[row, 'learning_rate'],
+          max_depth = list_hyperparameters[row, 'max_depth'],
+          bagging_fraction = list_hyperparameters[row, 'bagging_fraction'],
+          feature_fraction = list_hyperparameters[row, 'feature_fraction'],
+          feature_fraction_bynode = list_hyperparameters[row, 'feature_fraction_bynode'],
+          monotone_constraints = c(0, 0, 0, 1, 0, 0, 0)
+      ),
+      nrounds = 1000,
+      verbose = 0,
+      eval_freq = 1L,
+      objective = "poisson",
+      eval = "poisson",
+      nfold=5
+    )
+    current.iter = lgb_m1$best_iter
+    current.score = lgb_m1$best_score
+    
+    list_hyperparameters[row, 'score'] = current.score
+    list_hyperparameters[row, 'best_iter'] = current.iter
+}
+```
+
+```{r}
+list_hyperparameters
+```
+
+```{r}
+optimal_row = which.min(list_hyperparameters$score)
+best_iter = list_hyperparameters[optimal_row,"best_iter"]
+learning_rate = list_hyperparameters[optimal_row,"learning_rate"]
+max_depth = list_hyperparameters[optimal_row,"max_depth"]
+bagging_fraction = list_hyperparameters[optimal_row,"bagging_fraction"]
+feature_fraction = list_hyperparameters[optimal_row,"feature_fraction"]
+feature_fraction_bynode = list_hyperparameters[optimal_row,"feature_fraction_bynode"]
+list_hyperparameters[optimal_row,]
+```
+
+Re-estimate the whole model with the optimal hyperparameters
+
+```{r}
+lgb_m1_final = lightgbm(
+      data = lgb_train,
+      params = list(
+          learning_rate = learning_rate,
+          max_depth = max_depth,
+          bagging_fraction = bagging_fraction,
+          feature_fraction = feature_fraction,
+          feature_fraction_bynode = feature_fraction_bynode,
+          monotone_constraints = c(0, 0, 0, 1, 0, 0, 0)
+      ),
+      nrounds = best_iter,
+      verbose = 1L,
+      eval_freq = 1L,
+      objective = "poisson",
+      eval = "poisson"
+    )
+```
+
+```{r}
+pred = predict(lgb_m1_final, data.matrix(testing_set[cols]))
+
+2*(sum(dpois(x = testing_set$ClaimNb, 
+             lambda = testing_set$ClaimNb,
+             log=TRUE))-
+  sum(dpois(x = testing_set$ClaimNb, 
+            lambda = pred * testing_set$Exposure, 
+            log=TRUE)))
+```
+
+```{r}
+tree_imp = lgb.importance(lgb_m1_final, percentage = TRUE)
+lgb.plot.importance(tree_imp, top_n = 5L, measure = "Gain")
+```
+

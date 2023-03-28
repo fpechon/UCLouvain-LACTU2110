@@ -1,0 +1,425 @@
+---
+title: An R Markdown document converted from "3. RandomForest/Tree-based models -
+  RandomForest.ipynb"
+output: html_document
+---
+
+```{r}
+# require("CASdatasets") - Not necessary, as we saved the data as parquet file
+if (!require("rpart")) install.packages("rpart")
+if (!require("rpart.plot")) install.packages("rpart.plot")
+if (!require("arrow")) install.packages("arrow")
+if (!require("caret")) install.packages("caret", dependencies=TRUE)
+if (!require("ggplot2")) install.packages("ggplot2")
+if (!require("rattle")) install.packages("rattle")
+
+
+require("rpart")
+require("rpart.plot")
+require("arrow")
+require("caret")
+require("ggplot2")
+require("rattle")
+
+
+
+options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
+
+start_time <- Sys.time()
+```
+
+# Random Forest on Count Data
+
+Let us first install the random forest package for count data, called **rfCountData**. Note that Rtools is required on Windows.
+
+```{r}
+# If 401 error, uncomment the following line:
+Sys.unsetenv("GITHUB_PAT")
+if (!require(devtools)) install.packages("devtools")
+devtools::install_github("fpechon/rfCountData")
+
+
+# require("CASdatasets")
+require("rfCountData")
+require("caret")
+require("tidyr")
+require("arrow")
+```
+
+Let us load the data from the previously saved parquet file.
+
+```{r}
+dataset = read_parquet(file = "../data/dataset.parquet")
+```
+
+Similarly as in the previous session, we will split into a training and testing set. We are using the same seed to obtain identical training/testing sets across the various sessions.
+
+```{r}
+set.seed(21)
+in_training = createDataPartition(dataset$ClaimNb, times = 1, p = 0.8, list = FALSE)
+training_set = dataset[in_training, ]
+testing_set = dataset[-in_training, ]
+```
+
+The package **randomForest** allows to perform regression and classification. However, the split criterion in the regression case is based on the MSE, which may not be relevant for count data. Moreover, it did not allow the inclusion of an offset to take into account the different exposures of the policyholders.
+
+The package **rfCountData** tries to correct these issues. It is to be used only on count data.
+
+The use of the package is similar to the randomForest. Here, the main function is called rfPoisson.
+
+```{r}
+set.seed(5) # For reproducibility
+m0_rf = rfPoisson(x = training_set[,c("DriverAge", "CarAge")],
+                  offset = log(training_set$Exposure),
+                  y = training_set$ClaimNb,
+                  ntree = 50, # Number of trees in the forest
+                  nodesize = 4000, # Minimum number of observations in each leaf
+                  mtry=2, # Number of variables drawn at each node
+                  importance=TRUE,
+                  keep.inbag = TRUE,
+                  do.trace=TRUE)
+```
+
+```{r}
+?rfPoisson
+```
+
+## Hyperparameters
+
+In a random forest, we can play around with the following parameters
+
+- ntree: the number of trees of the forest
+- mtry: the number of variables randomly sampled as candidates at each split
+- nodesize : Number of cases in the terminal nodes (= leaves).
+- maxnodes : Maximum number of terminal nodes trees in the forest can have
+
+We also have some parameters related to the sampling done for each tree:
+
+- replace: Are the sampling of cases with or without replacement
+- sampsize: Size of the sampled cases
+
+## A note on Out-of-bag (OOB)
+
+In average, we expect more or less 36.788% observations to be OOB (why ?). We can check if we obtained similar number of OOB. Let us compute on tree number 1, how many times each observation has been drawn.
+
+```{r}
+m0_rf$inbag[,1] %>% 
+  table() %>% 
+  prop.table %>% 
+  round(3)
+```
+
+Similarly on tree number 2:
+
+```{r}
+m0_rf$inbag[,2] %>% 
+  table() %>% 
+  prop.table %>% 
+  round(3)
+```
+
+At which point has every observation been OOB in at least one bootstrap sample (one tree) ?
+
+```{r}
+# Cumulative product (will be 0 once the policy has been OOB for the first time)
+OOB_analysis = apply(m0_rf$inbag, 1, cumprod) 
+# OOB_analysis is a 50 x n matrix. On each row, we take the sum. The first row
+# with a sum = 0 means that all observations have been OOB at least once.
+which.min(apply(OOB_analysis, 1, sum))
+```
+
+It can even be showed that for $ \lim_{ntree \rightarrow \infty} OOBE = \text{LLO-CV} $ the  converges to the LOO-CV error estimate (leave one out cross validation) which is unbiased but with higher variance with respect to k-fold CV with k<n. (see Hastie, T., Tibshirani, R., Friedman, J. (2001). The Elements of Statistical Learning.)
+
+Therefore, one could use the Out-of-bag error to find the optimal hyperparameters of the random forest.
+
+## Dependence plot
+
+If we want some idea of the marginal effect of the variables, we can use the partial dependence plots
+
+```{r}
+par(mfrow = c(1, 2))
+partialPlot(m0_rf, training_set, offset = log(training_set$Exposure), x.var = "DriverAge")
+```
+
+```{r}
+partialPlot(m0_rf, training_set, offset = log(training_set$Exposure), x.var = "CarAge")
+```
+
+## Variable Importance
+
+We can extract the variable importance. The importance is computed using permutations. Basically, for each variable at a time, a shuffle is performed. The increase of the OOB error is then used as importance metric.
+
+```{r}
+importance(m0_rf)
+```
+
+## Deviance
+
+We can see the deviance (on the training_set) as a function of the number of trees. After a few iterations, the error will stabilize.
+
+```{r}
+plot(m0_rf)
+```
+
+For the sake of comparison, let’s decrease the nodesize to 2500, and let mtry to 2 and increase the number of trees.
+
+
+```{r}
+set.seed(5)
+m1_rf = rfPoisson(x = training_set[, c("DriverAge", "CarAge")], offset = log(training_set$Exposure),
+    y = training_set$ClaimNb, ntree = 100, nodesize = 2500, mtry = 2, importance = TRUE,
+    do.trace = TRUE)
+```
+
+We can again see the error (mean deviance) as a function of the number of trees
+
+```{r}
+plot(m1_rf)
+```
+
+```{r}
+importance(m1_rf)
+```
+
+Finally, we can compute the deviance on the testing set
+
+```{r}
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb, log = TRUE)) -
+    sum(dpois(x = testing_set$ClaimNb, lambda = predict(m1_rf, testing_set[, c("DriverAge",
+        "CarAge")], log(testing_set$Exposure)), log = TRUE)))
+```
+
+At this point, we only used two variables, and the mtry parameter was set to 2. This means, that for each tree, and for each node, we drew 2 variables … out of 2: the random sampling of features did not really take place. When mtry = # variables, we are essentially constructing **bagged trees** …
+
+Obviously, random forests are supposed to work with a greater amount of variables. By default, mtry will be **a third** of the total number of features.
+
+If we had set mtry to 1, we would have constructed each node with one of the variables and this one would have been chosen randomly. The ‘split’ point would however been selected using the loss function.
+
+We can give it go and try with mtry = 1.
+
+```{r}
+set.seed(8)
+m2_rf = rfPoisson(x = training_set[, c("DriverAge", "CarAge")], offset = log(training_set$Exposure),
+    y = training_set$ClaimNb, ntree = 100, nodesize = 2500, mtry = 1, importance = TRUE,
+    do.trace = TRUE)
+```
+
+Let us take a look at the variable importance.
+
+```{r}
+importance(m2_rf)
+```
+
+```{r}
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb, log = TRUE)) -
+    sum(dpois(x = testing_set$ClaimNb, lambda = predict(m2_rf, testing_set[, c("DriverAge",
+        "CarAge")], log(testing_set$Exposure)), log = TRUE)))
+```
+
+# Use all the variables
+
+Some variables are factors, others are numerical variables. We can directly construct our random forest. We will set **mtry = floor(7/3) = 2** (default value).
+
+
+```{r}
+set.seed(5)
+m4_rf = rfPoisson(x = training_set[, c("Power", "CarAge", "DriverAge", "Brand", "Gas",
+    "Region", "Density")], offset = log(training_set$Exposure), y = training_set$ClaimNb,
+    ntree = 100, nodesize = 2500, mtry = 2, importance = TRUE, do.trace = TRUE)
+```
+
+When a variable is a factor (not ordered), at each node, the average claim frequency for each level will be computed. Then, the levels will be sorted based on these claim frequencies, and a splitting among these sorted levels will be identified. If a variable a an ordered factor, the splitting point will be done on the ‘natural’ ordering of the levels, similarly to how a numerical variable is split.
+
+```{r}
+plot(m4_rf)
+```
+
+```{r}
+plotdata = as.data.frame(importance(m4_rf))
+names(plotdata) = "importance"
+plotdata$var = rownames(plotdata)
+
+ggplot(plotdata,aes(x =reorder(var,importance), y=importance)) + geom_bar(stat='identity')+coord_flip()+
+  scale_x_discrete(name="Variable")
+```
+
+Let us set the power variable as being **ordered** (Power will therefore be treated like a numerical variable) and reduce to 25 trees, only to allow a live demonstration.
+
+```{r}
+training_set$Power_ordered = as.ordered(training_set$Power)
+testing_set$Power_ordered = as.ordered(testing_set$Power)
+
+
+set.seed(5)
+m5_rf = rfPoisson(x = training_set[,c("Power_ordered","CarAge","DriverAge","Brand","Gas","Region","Density")],
+                  offset = log(training_set$Exposure),
+                  y = training_set$ClaimNb,
+                  ntree = 25,
+                  nodesize = 2500,
+                  mtry=2,
+                  importance=TRUE,
+                  do.trace=TRUE)
+```
+
+```{r}
+plotdata = as.data.frame(importance(m5_rf))
+names(plotdata) = "importance"
+plotdata$var = rownames(plotdata)
+
+ggplot(plotdata,aes(x =reorder(var,importance), y=importance)) + geom_bar(stat='identity')+coord_flip()+
+  scale_x_discrete(name="Variable")
+```
+
+The Power variable now appears to have some importance (to be checked, though, with more trees).
+
+## Cross-Validation
+
+We could rely on cross-validation to find the optimal hyper parameters, instead of Out-of-bag error. 
+
+Ideally, we would construct a grid of possible hyperparameters. For instance, we could choose a set of possible values for *nodesize* and for *mtry*. Then, run the cross-validation on each of the possible cases.
+
+However, due to time limitation of this live demo, we are only going to compare two different mtry parameter (due to the time limitation).
+
+We will fasten the learning process by parallelizing the learning of the different forest on the different folds.
+
+For mtry = 3 and nodesize = 10000,
+
+```{r}
+set.seed(6)
+folds = createFolds(training_set$ClaimNb, k = 5)
+require(parallel)
+```
+
+```{r}
+cl = makeCluster(5)
+clusterExport(cl, "training_set")
+set.seed(859)
+res0 = parLapply(cl, folds, function(X) {
+    require(rfCountData)
+    m_cv = rfPoisson(x = training_set[-X, c("Power_ordered", "CarAge", "DriverAge",
+        "Brand", "Gas", "Region", "Density")], offset = log(training_set[-X, ]$Exposure),
+        y = training_set[-X, ]$ClaimNb, xtest = training_set[X, c("Power_ordered",
+            "CarAge", "DriverAge", "Brand", "Gas", "Region", "Density")], offsettest = log(training_set[X,
+            ]$Exposure), ytest = training_set[X, ]$ClaimNb, ntree = 100, nodesize = 10000,
+        mtry = 3, importance = TRUE, do.trace = FALSE, keep.forest = FALSE)
+    pred = m_cv$test$predicted
+    2 * (sum(dpois(x = training_set[X, ]$ClaimNb, lambda = training_set[X, ]$ClaimNb,
+        log = TRUE)) - sum(dpois(x = training_set[X, ]$ClaimNb, lambda = pred, log = TRUE)))/nrow(training_set[X,
+        ])
+})
+stopCluster(cl)
+```
+
+For mtry = 5 and nodesize = 10000,
+
+
+```{r}
+set.seed(6)
+folds = createFolds(training_set$ClaimNb, k = 5)
+require(parallel)
+cl = makeCluster(5)
+clusterExport(cl, "training_set")
+set.seed(256)
+res1 = parLapply(cl, folds, function(X) {
+    require(rfCountData)
+    m_cv = rfPoisson(x = training_set[-X, c("Power_ordered", "CarAge", "DriverAge",
+        "Brand", "Gas", "Region", "Density")], offset = log(training_set[-X, ]$Exposure),
+        y = training_set[-X, ]$ClaimNb, xtest = training_set[X, c("Power_ordered",
+            "CarAge", "DriverAge", "Brand", "Gas", "Region", "Density")], offsettest = log(training_set[X,
+            ]$Exposure), ytest = training_set[X, ]$ClaimNb, ntree = 100, nodesize = 10000,
+        mtry = 5, importance = TRUE, do.trace = FALSE, keep.forest = FALSE)
+    pred = m_cv$test$predicted
+    2 * (sum(dpois(x = training_set[X, ]$ClaimNb, lambda = training_set[X, ]$ClaimNb,
+        log = TRUE)) - sum(dpois(x = training_set[X, ]$ClaimNb, lambda = pred, log = TRUE)))/nrow(training_set[X,
+        ])
+})
+stopCluster(cl)
+```
+
+We obtain the following results:
+
+```{r}
+apply(cbind(unlist(res0), unlist(res1)), 2, mean)
+```
+
+We could also have tried different nodesize values. Due to time limitation, we will compare them using OOB error.
+
+Let us now construct the whole forest on the whole training_set with the optimal mtry = 3.
+
+
+```{r}
+set.seed(43)
+m_final_1 = rfPoisson(x = training_set[, c("Power_ordered", "CarAge", "DriverAge",
+    "Brand", "Gas", "Region", "Density")], offset = log(training_set$Exposure), y = training_set$ClaimNb,
+    xtest = testing_set[, c("Power_ordered", "CarAge", "DriverAge", "Brand", "Gas",
+        "Region", "Density")], offsettest = log(testing_set$Exposure), ytest = testing_set$ClaimNb,
+    ntree = 100, nodesize = 10000, mtry = 3, importance = TRUE, do.trace = TRUE,
+    keep.forest = TRUE)
+```
+
+```{r}
+plot(m_final_1)
+```
+
+We can compare with a higher nodesize..
+
+```{r}
+set.seed(43)
+m_final_2 = rfPoisson(x = training_set[, c("Power_ordered", "CarAge", "DriverAge",
+    "Brand", "Gas", "Region", "Density")], offset = log(training_set$Exposure), y = training_set$ClaimNb,
+    xtest = testing_set[, c("Power_ordered", "CarAge", "DriverAge", "Brand", "Gas",
+        "Region", "Density")], offsettest = log(testing_set$Exposure), ytest = testing_set$ClaimNb,
+    ntree = 100, nodesize = 15000, mtry = 3, importance = TRUE, do.trace = TRUE,
+    keep.forest = TRUE)
+```
+
+```{r}
+plot(m_final_2)
+```
+
+… and with a lower nodesize.
+
+```{r}
+set.seed(43)
+m_final_3 = rfPoisson(x = training_set[, c("Power_ordered", "CarAge", "DriverAge",
+    "Brand", "Gas", "Region", "Density")], offset = log(training_set$Exposure), y = training_set$ClaimNb,
+    xtest = testing_set[, c("Power_ordered", "CarAge", "DriverAge", "Brand", "Gas",
+        "Region", "Density")], offsettest = log(testing_set$Exposure), ytest = testing_set$ClaimNb,
+    ntree = 100, nodesize = 5000, mtry = 3, importance = TRUE, do.trace = TRUE, keep.forest = TRUE)
+```
+
+```{r}
+plot(m_final_3)
+```
+
+We conclude with the usual mean deviance on the testing_set
+
+```{r}
+pred = predict(m_final_1, testing_set[,c("Power_ordered","CarAge","DriverAge","Brand","Gas","Region","Density")], offset = log(testing_set$Exposure))
+2*(sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb,log=TRUE))-
+  sum(dpois(x = testing_set$ClaimNb, lambda = pred,
+            log=TRUE)))
+```
+
+```{r}
+pred = predict(m_final_2, testing_set[,c("Power_ordered","CarAge","DriverAge","Brand","Gas","Region","Density")], offset = log(testing_set$Exposure))
+2*(sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb,log=TRUE))-
+  sum(dpois(x = testing_set$ClaimNb, lambda = pred,
+            log=TRUE)))
+```
+
+```{r}
+pred = predict(m_final_3, testing_set[,c("Power_ordered","CarAge","DriverAge","Brand","Gas","Region","Density")], offset = log(testing_set$Exposure))
+2*(sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb,log=TRUE))-
+  sum(dpois(x = testing_set$ClaimNb, lambda = pred,
+            log=TRUE)))
+```
+
+```{r}
+end_time <- Sys.time()
+```
+
+```{r}
+end_time - start_time
+```
+
