@@ -17,7 +17,9 @@ require("plyr")
 require("ggplot2")
 require("gridExtra")
 if (!require("parallel")) install.packages("parallel")
+if (!require("mgcViz")) install.packages("mgcViz")
 require("parallel")
+require("mgcViz")
 require("arrow")
 require("tidymodels")
 ```
@@ -530,6 +532,26 @@ We conclude here, we did not find any further interactions. We can compute the d
 2 * (sum(dpois(x = bake(rec, testing_set)$ClaimNb, lambda = bake(rec, testing_set)$ClaimNb, log = TRUE)) -
     sum(dpois(x = bake(rec, testing_set)$ClaimNb, lambda = predict(m0_bam, bake(rec, testing_set), offset = bake(rec, testing_set)$Exposure,
         type = "response"), log = TRUE)))
+```
+
+# Optimizing the number of nodes
+
+We can also optimize the number of nodes by cross-validation.
+
+```{r}
+res5 = lapply(folds, function(X) {
+    cl = makeCluster(detectCores() - 1)  # Number of cores to use
+    m3_bam = bam(ClaimNb ~ offset(log(Exposure)) + Power * Region + Brand +
+                 Gas+ s(DriverAge, k=15) + s(CarAge), data = bake(rec, training_set[-X,]), 
+                 family = poisson(link = log),
+                 cluster = cl)
+    stopCluster(cl)
+    pred = predict(m3_bam, bake(rec, training_set[X, ]), type = "response")
+    sum(dpois(x = bake(rec, training_set[X, ])$ClaimNb, lambda = pred, log = TRUE))
+    # sum(-pred +
+    # training_set[X,]$ClaimNb*log(pred)-log(factorial(training_set[X,]$ClaimNb)))
+})
+apply(cbind(unlist(res0), unlist(res5)), 2, mean)
 ```
 
 # Comparison with best GLM model

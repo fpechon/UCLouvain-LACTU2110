@@ -263,7 +263,7 @@ We can check the prediction power of the model on the testing set.
 
 #### Tweaking the model
 
-We would have to tweak the parameters. We should define a grid of parameters and perform cross-validation to choose the optimal parameters. Due to time restriction, we will only show one example, for instance (interaction depth changed from 10 to 5):
+We would have to tweak the parameters. We should define a grid of parameters and perform cross-validation to choose the optimal parameters. Due to time restriction, we will only show one example, for instance (interaction depth changed from 5 to 10):
 
 ```{r}
 set.seed(89)

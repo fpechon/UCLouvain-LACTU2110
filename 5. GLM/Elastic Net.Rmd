@@ -155,3 +155,98 @@ x_test = model.matrix(ClaimNb ~ 0 + Power * Region + Power * Brand + Power * Gas
         type = "response"), log = TRUE)))
 ```
 
+# Experiment
+
+Let us construct the factors a bit differently. We will only use the variables DriverAge and CarAge for illustration here.
+
+```{r}
+for (age in (18:99)){
+    training_set[paste0("DriverAge_", age)] = 1*(training_set$DriverAge <= age)
+    testing_set[paste0("DriverAge_", age)] = 1*(testing_set$DriverAge <= age)
+}
+
+for (vehage in (0:25)){
+    training_set[paste0("CarAge_", vehage)] = 1*(training_set$CarAge <= vehage)
+    testing_set[paste0("CarAge_", vehage)] = 1*(testing_set$CarAge <= vehage)
+}
+```
+
+```{r}
+ptn=Sys.time()
+model_exp_x = model.matrix(ClaimNb ~ 0 + DriverAge_18 + DriverAge_19 + DriverAge_20 + DriverAge_21 + DriverAge_22 + 
+                 DriverAge_23 + DriverAge_24 + DriverAge_25 + DriverAge_26 + DriverAge_27 + DriverAge_28 + 
+                 DriverAge_29 + DriverAge_30 + DriverAge_31 + DriverAge_32 + DriverAge_33 + DriverAge_34 + 
+                 DriverAge_35 + DriverAge_36 + DriverAge_37 + DriverAge_38 + DriverAge_39 + DriverAge_40 + 
+                 DriverAge_41 + DriverAge_42 + DriverAge_43 + DriverAge_44 + DriverAge_45 + DriverAge_46 + 
+                 DriverAge_47 + DriverAge_48 + DriverAge_49 + DriverAge_50 + DriverAge_51 + DriverAge_52 + 
+                 DriverAge_53 + DriverAge_54 + DriverAge_55 + DriverAge_56 + DriverAge_57 + DriverAge_58 + 
+                 DriverAge_59 + DriverAge_60 + DriverAge_61 + DriverAge_62 + DriverAge_63 + DriverAge_64 + 
+                 DriverAge_65 + DriverAge_66 + DriverAge_67 + DriverAge_68 + DriverAge_69 + DriverAge_70 + 
+                 DriverAge_71 + DriverAge_72 + DriverAge_73 + DriverAge_74 + DriverAge_75 + DriverAge_76 + 
+                 DriverAge_77 + DriverAge_78 + DriverAge_79 + DriverAge_80 + DriverAge_81 + DriverAge_82 + 
+                 DriverAge_83 + DriverAge_84 + DriverAge_85 + DriverAge_86 + DriverAge_87 + DriverAge_88 + 
+                 DriverAge_89 + DriverAge_90 + DriverAge_91 + DriverAge_92 + DriverAge_93 + DriverAge_94 + 
+                 DriverAge_95 + DriverAge_96 + DriverAge_97 + DriverAge_98 + DriverAge_99 + 
+                 CarAge_0 + CarAge_1 + CarAge_2 + CarAge_3 + CarAge_4 + CarAge_5 + CarAge_6 + 
+                 CarAge_7 + CarAge_8 + CarAge_9 + CarAge_10 + CarAge_11 + CarAge_12 + 
+                 CarAge_13 + CarAge_14 + CarAge_15 + CarAge_16 + CarAge_17 + CarAge_18 + 
+                 CarAge_19 + CarAge_20 + CarAge_21 + CarAge_22 + CarAge_23 + CarAge_24 + CarAge_25,
+                 data=training_set)
+```
+
+```{r}
+set.seed(542)
+folds = createFolds(training_set$ClaimNb, 5, list=FALSE)
+
+set.seed(58)
+m.lasso.1.cv = cv.glmnet(  model_exp_x, y = training_set$ClaimNb, 
+                           offset = log(training_set$Exposure),
+                           family = "poisson",
+                           alpha = 1, #LASSO = 1, Ridge = 0,
+                           nfolds = 5,
+                           foldid = folds,
+                           maxit=10^4,
+                           nlambda = 25)
+
+
+ptn_1 = Sys.time() - ptn
+ptn_1
+```
+
+```{r}
+m.lasso.1.cv
+```
+
+```{r}
+coef(m.lasso.1.cv, s = "lambda.min")
+```
+
+```{r}
+plotdata = expand.grid(DriverAge = 18:99, CarAge = 0:25, Exposure = 1)
+
+
+for (age in (18:99)){
+    plotdata[paste0("DriverAge_", age)] = 1*(plotdata$DriverAge <= age)
+}
+for (vehage in (0:25)){
+    plotdata[paste0("CarAge_", vehage)] = 1*(plotdata$CarAge <= vehage)
+}
+
+plotdata['prediction'] = predict(m.lasso.1.cv, 
+                                 as.matrix(subset(plotdata, select = -c(DriverAge, CarAge, Exposure))),
+                                 newoffset = 0, 
+                                 type="response", 
+                                 s = m.lasso.1.cv$lambda.min)
+```
+
+```{r}
+require(ggplot2)
+ggplot(plotdata %>% group_by(DriverAge) %>% summarise(prediction = mean(prediction)), 
+       aes(x=DriverAge, y=prediction)) + geom_point() + geom_line() + theme_bw()
+```
+
+```{r}
+ggplot(plotdata %>% group_by(CarAge) %>% summarise(prediction = mean(prediction)), 
+       aes(x=CarAge, y=prediction)) + geom_point() + geom_line() + theme_bw()
+```
+
