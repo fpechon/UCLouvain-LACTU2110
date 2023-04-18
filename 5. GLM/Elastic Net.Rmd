@@ -1,0 +1,157 @@
+---
+title: An R Markdown document converted from "5. GLM/Elastic Net.ipynb"
+output: html_document
+---
+
+```{r}
+# The easiest way to get recipes is to install all of tidymodels:
+# install.packages("tidymodels")
+install.packages("multilevelmod")
+options(encoding = 'UTF-8')
+#Loading all the necessary packages
+if (!require("caret")) install.packages("caret")
+if (!require("recipes")) install.packages("recipes")
+if (!require("visreg")) install.packages("visreg")
+if (!require("MASS")) install.packages("MASS")
+if (!require("glmnet")) install.packages("glmnet")
+if (!require("jtools")) install.packages("jtools")
+if (!require("scales")) install.packages("scales")
+if (!require("forcats")) install.packages("forcats")
+if (!require("stringr")) install.packages("stringr")
+if (!require("poissonreg")) install.packages("poissonreg")
+
+
+
+require("caret")
+require("recipes")
+require("visreg")
+require("MASS")
+require("glmnet")
+require("jtools")
+require("scales")
+require("forcats")
+require("stringr")
+require("arrow")
+require("forcats")
+require("doParallel")
+require("yardstick")
+require("parsnip")
+require("workflows")
+require("poissonreg")
+require("rsample")
+require("tune")
+require("yardstick")
+
+options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
+```
+
+```{r}
+dataset = read_parquet(file = "../data/dataset.parquet")
+
+set.seed(21)
+in_training = createDataPartition(dataset$ClaimNb, times = 1, p = 0.8, list = FALSE)
+training_set = dataset[in_training, ]
+testing_set = dataset[-in_training, ]
+```
+
+# Lasso 
+
+```{r}
+ptn=Sys.time()
+x = model.matrix(ClaimNb ~ 0 + Power  * Region + Power*Brand + Power*Gas +  Region* Brand + Region* Gas + Brand*Gas,
+                 data=training_set)
+set.seed(542)
+folds = createFolds(training_set$ClaimNb, 5, list=FALSE)
+
+set.seed(58)
+m.lasso.0.cv = cv.glmnet(x, y = training_set$ClaimNb, 
+                         offset = log(training_set$Exposure),
+       family = "poisson",
+       alpha = 1, #LASSO = 1, Ridge = 0,
+       nfolds = 5,
+       foldid = folds,
+       maxit=10^4,
+       nlambda = 25)
+
+
+ptn_1 = Sys.time() - ptn
+ptn_1
+```
+
+```{r}
+plot(m.lasso.0.cv)
+```
+
+```{r}
+coef(m.lasso.0.cv, s = "lambda.min")
+```
+
+# Ridge
+
+```{r}
+ptn=Sys.time()
+set.seed(58)
+m.ridge.0.cv = cv.glmnet(x, y = training_set$ClaimNb, offset = log(training_set$Exposure),
+       family = "poisson",
+       alpha = 0, #LASSO = 1, Ridge = 0,
+       nfolds = 5,
+       foldid = folds,
+       maxit = 10^3,
+       nlambda = 25)
+
+ptn_1 = Sys.time() - ptn
+ptn_1
+```
+
+```{r}
+plot(m.ridge.0.cv)
+```
+
+# Elastic Net
+
+```{r}
+ptn=Sys.time()
+set.seed(58)
+m.elasticnet.0.cv = cv.glmnet(x, y = training_set$ClaimNb, offset = log(training_set$Exposure),
+       family = "poisson",
+       alpha = 0.5, #LASSO = 1, Ridge = 0,
+       nfolds = 5,
+       foldid = folds,
+       maxit = 10^3,
+       nlambda = 25)
+
+ptn_1 = Sys.time() - ptn
+ptn_1
+```
+
+```{r}
+plot(m.elasticnet.0.cv)
+```
+
+# Comparison with GLM
+
+```{r}
+x_test = model.matrix(ClaimNb ~ 0 + Power * Region + Power * Brand + Power * Gas +
+    Region * Brand + Region * Gas + Brand * Gas, data = testing_set)
+
+
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb, log = TRUE)) -
+    sum(dpois(x = testing_set$ClaimNb, lambda = predict(m.lasso.0.cv, newx = x_test,
+        newoffset = log(testing_set$Exposure), s = m.lasso.0.cv$lambda.min, type = "response"),
+        log = TRUE)))
+```
+
+```{r}
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb, log = TRUE)) -
+    sum(dpois(x = testing_set$ClaimNb, lambda = predict(m.ridge.0.cv, newx = x_test,
+        newoffset = log(testing_set$Exposure), s = m.ridge.0.cv$lambda.min, type = "response"),
+        log = TRUE)))
+```
+
+```{r}
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb, log = TRUE)) -
+    sum(dpois(x = testing_set$ClaimNb, lambda = predict(m.elasticnet.0.cv, newx = x_test,
+        newoffset = log(testing_set$Exposure), s = m.elasticnet.0.cv$lambda.min,
+        type = "response"), log = TRUE)))
+```
+

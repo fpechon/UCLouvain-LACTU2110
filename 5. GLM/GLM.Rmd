@@ -1,0 +1,906 @@
+---
+title: An R Markdown document converted from "5. GLM/GLM.ipynb"
+output: html_document
+---
+
+# Generalized Linear Models
+
+```{r}
+# The easiest way to get recipes is to install all of tidymodels:
+# install.packages("tidymodels")
+options(encoding = 'UTF-8')
+#Loading all the necessary packages
+if (!require("caret")) install.packages("caret")
+if (!require("recipes")) install.packages("recipes")
+if (!require("visreg")) install.packages("visreg")
+if (!require("MASS")) install.packages("MASS")
+if (!require("glmnet")) install.packages("glmnet")
+if (!require("jtools")) install.packages("jtools")
+if (!require("scales")) install.packages("scales")
+if (!require("forcats")) install.packages("forcats")
+if (!require("stringr")) install.packages("stringr")
+if (!require("poissonreg")) install.packages("poissonreg")
+
+
+
+require("caret")
+require("recipes")
+require("visreg")
+require("MASS")
+require("glmnet")
+require("jtools")
+require("scales")
+require("forcats")
+require("stringr")
+require("arrow")
+require("forcats")
+require("doParallel")
+require("yardstick")
+require("parsnip")
+require("workflows")
+require("poissonreg")
+require("rsample")
+require("tune")
+require("yardstick")
+
+options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
+```
+
+We can also load the data (same as in the previous sessions).
+
+```{r}
+dataset = read_parquet(file = "../data/dataset.parquet")
+```
+
+## Data Preparation
+
+For GLMs, we will need to prepare the data that we feed to the model. Indeed, we will have to provide the list of variables we wish to use and also supply the interactions terms. On top of that, we will *probably* need to bin some continuous variables into categorical ones. Let us re-take a look at some of the variables in the dataset.
+
+An important preliminary step is always data preparation. In our simple dataset, we only have 10 variables. As a reminder, we have the following variables.
+
+```{r}
+str(dataset)
+```
+
+As we see, some variables are considered as integers (int) and others are considered as factors. For factor variable, an important feature is the **reference level**. R automatically assigns the **first category/value** encountered as reference level. This can often be suboptimal, and it is preferable to have as reference level the category with the most observation (or largest exposure).
+
+### Brand
+
+We can see the different levels of a factor variable with the levels function. The first level is the **reference level**.
+
+```{r}
+levels(dataset$Brand)
+```
+
+Using the function *fct_count* from package *forcats* we can easily compute the number of rows for each level of the factor variable.
+
+```{r}
+dataset$Brand %>% fct_count(sort=TRUE, prop=TRUE)
+```
+
+*Renault, Nissan or Citroen* appears to be the most populated level of variable ‘Brand’. This is why we will set this level as reference level, using the function **relevel**, or we can directly use the relevant function from the forcats package that will determine the most populated level and set that level as the reference level.
+
+```{r}
+# dataset$Brand = relevel(x = dataset$Brand, ref= "Renault, Nissan or Citroen")
+# Easier with forcats
+
+dataset$Brand = dataset$Brand %>% fct_infreq()
+levels(dataset$Brand)
+```
+
+### Gas
+
+```{r}
+dataset$Gas %>% fct_count(sort=TRUE, prop=TRUE)
+```
+
+We will set Regular as reference level.
+
+```{r}
+dataset$Gas = dataset$Gas %>% fct_infreq()
+levels(dataset$Gas)
+```
+
+### Region
+
+```{r}
+dataset$Region %>% fct_count(sort=TRUE, prop=TRUE)
+```
+
+We will set Regular as reference level.
+
+```{r}
+dataset$Region = dataset$Region %>% fct_infreq()
+levels(dataset$Region)
+```
+
+### Power
+
+Power is bit of a different factor variable. Indeed, there is some order between the levels (from lower power to higher power).
+
+```{r}
+dataset$Power %>% fct_count(sort=TRUE, prop=TRUE)
+```
+
+We will leave *d* as reference level, as it is highly populated and will allow us to keep it simple to interpret the regression coefficients (levels are ordered).
+
+```{r}
+dataset$Power = dataset$Power %>% fct_relevel(sort)
+levels(dataset$Power)
+```
+
+## Model
+
+We are going to model the claim frequencies using a GLM. We will only consider the categorical variables in this part, as we will see later that other tools are available to treat the continuous variables without having to discretize them.
+
+Let us first split out dataset in two parts: a training set and a testing set (this step requires the caret package).
+
+```{r}
+set.seed(21)  # For reproducibility
+in_training = createDataPartition(dataset$ClaimNb, times = 1, p = 0.8, list = FALSE)
+training_set = dataset[in_training, ]
+testing_set = dataset[-in_training, ]
+```
+
+### Intercept
+
+The main function is called *glm*. Let us run the function on our training set. We will need to provide the offset to account for the different Exposures.
+
+```{r}
+m0 = glm(ClaimNb ~ offset(log(Exposure)), 
+         data = training_set, 
+         family = poisson())
+summary(m0)
+```
+
+By default, the link function is the log (see help file ?poisson).
+
+In a GLM without any variables, the exponential of the intercept $\exp\beta_0$ corresponds to the average claim frequency. 
+
+Indeed, if we compare $\exp\beta_0$ with $\displaystyle\frac{\sum_i ClaimNB_i}{\sum_i Exposure_i}$, we obtain
+
+```{r}
+list(exp(m0$coef[1]), # m0$coef[1] is the Intercept
+     with(training_set, sum(ClaimNb) / sum(Exposure)))
+```
+
+### Include Variables
+
+First, we will only consider the discrete variables, namely Power, Brand, Gas and Region.
+
+Let us include all these variables (without interactions) in the model.
+
+```{r}
+m1 = glm(ClaimNb ~ offset(log(Exposure)) + Power + Gas + Brand + Region, 
+         data = training_set,
+         family = poisson(link = log))
+summary(m1)
+```
+
+#### Visualize the model
+
+For GLMs we don't need partial dependence plots, as the have a clear formula explaining the relationship between the features and the response variable.
+
+We will use the function visreg from package **visreg** to plot the coefficients, along with their confidence interval. We can specify the **type** of plot we want:
+
+From the documentation of *visreg*, we can read the following
+
+The type of plot to be produced. The following options are supported:
+- If **conditional** is selected, the plot returned shows the value of the variable on the x-axis and the change in response on the y-axis, holding all other variables constant (by default, median for numeric variables and most common category for factors).
+- If **contrast** is selected, the plot returned shows the effect on the expected value of the response by moving the x variable away from a reference point on the x-axis (for numeric variables, this is taken to be the mean).
+
+
+If we want to have the coefficients on the claim frequency scale, we can specify *scale = "response"*. Otherwise we can specify *scale = "linear"* to see the $\displaystyle\beta$s
+
+#####  Power
+
+```{r}
+visreg(m1, "Power", type="conditional", scale="response", gg=TRUE, rug=FALSE, partial=FALSE) + theme_bw()
+```
+
+```{r}
+visreg(m1, "Power", type="contrast", scale="response", gg=TRUE, rug=FALSE, partial=FALSE) + theme_bw()
+```
+
+##### Gas
+
+```{r}
+visreg(m1, "Gas", type="contrast", scale="response", gg=TRUE, rug=FALSE, partial=FALSE) + theme_bw()
+```
+
+##### Region 
+
+```{r}
+visreg(m1, "Region", type="contrast", scale="response", gg=TRUE, rug=FALSE, partial=FALSE) + theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+##### Brand
+
+```{r}
+visreg(m1, "Brand", type="contrast", scale="response", gg=TRUE, rug=FALSE, partial=FALSE) + theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+#### Comparing two models
+
+We see some levels of some variables appear to be not significantly different from 0 (or 1 on the response scale). Moreover, it could be that some levels appear to be significantly different from 0, but are not significantly different from each other and could be merged.
+
+If we wish to perform a likelihood ratio test between the full model $m_1$ and the model without any explanatory variables $m_0$
+
+```{r}
+anova(m0, m1, test = "Chisq")
+```
+
+Note:
+
+Null Deviance = 2(LL(Saturated Model) - LL(Null Model)) on df = df_Sat - df_Null
+
+Residual Deviance = 2(LL(Saturated Model) - LL(Proposed Model)) df = df_Sat - df_Proposed
+
+##### Predict claim frequencies
+
+If we want to predict claim frequencies, we can directly use the predict function. We need to specify that the output needs to be of *type = "response"*, so that we obtain claim frequencies, rather than the linear predictor (on the "score" scale). For example, for the first four lines of the testing_set, we get:
+
+```{r}
+predict(m1, head(testing_set, 4), type="response")
+```
+
+### Offset or weights ?
+
+Let us compare the previous model with the following model, which, some call a "Poisson rate model")
+
+```{r}
+m2 = glm(ClaimNb/Exposure ~ Power + Gas + Brand + Region, 
+         data = training_set,
+         weight = training_set$Exposure,
+         family = poisson(link = log))
+summary(m2)
+```
+
+Let us compare the coefficients
+
+```{r}
+cbind(m1$coef, m2$coef)
+```
+
+Why does that work ? See whiteboard or : https://stats.stackexchange.com/a/270151
+
+### Remarks 
+
+Up to now, we have 
+1. Load the original dataset. 
+2. We have prepared the data in some way (relevel the factors we instance). We could have binned the continuous variables.
+3. Run a model on these variables.
+4. Predict for some new observations (-> testing set ?).
+
+
+There are some flaws in the way of working. 
+
+- We should not prepare the data *before* splitting into training and testing set. Although, we did not include information from the testing set into the training set here, we could have done so, if, for example, we were to standardize some variables. Indeed, if we standardize a continuous variable by substracting the mean and dividing by the standard deviation, since we have computed the mean and the standard deviation on the whole dataset (rather than only on the training set), we include information about the testing_set into the training_set and the otherway around as well.
+
+- What if new data comes ? How will we handle this ? Do we need to reprocess the data preparation again ? How do we keep track of all the preprocessing that we have done ?
+
+One way to handle this issues correctly is working with **recipes** (https://recipes.tidymodels.org/index.html). So, let's restart this session and use **recipes**.
+
+We will reload the data from the parquet files and directly split the data into a training and a testing set.
+
+## Restart with recipes
+
+```{r}
+dataset = read_parquet(file = "../data/dataset.parquet")
+
+set.seed(21)
+in_training = createDataPartition(dataset$ClaimNb, times = 1, p = 0.8, list = FALSE)
+training_set = dataset[in_training, ]
+testing_set = dataset[-in_training, ]
+```
+
+We can specify a *recipe* to prepare the data correctly. The idea is to define this once, and apply it on different datasets, so we don't need to preprocess the data manually.
+
+```{r}
+rec_0 <- recipe(ClaimNb ~ Exposure + Power + Gas + Brand + Region, data = training_set) %>%
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    prep()
+rec_0
+```
+
+```{r}
+output = bake(rec_0, new_data = head(training_set, 4))
+output
+```
+
+Let us check the reference levels of the output
+
+```{r}
+str(output)
+```
+
+to be compared with 
+
+```{r}
+str(training_set)
+```
+
+We can use the recipe on the training and the testing set, and construct the same GLM as above. We can check that the results are the same and that we can predict on the testing set
+
+```{r}
+train_baked = bake(rec_0, new_data = training_set)
+test_baked = bake(rec_0, new_data = testing_set) 
+
+m3 = glm(ClaimNb ~ offset(log(Exposure)) + Power + Gas + Brand + Region, data = train_baked, family = poisson())
+summary(m3)
+```
+
+```{r}
+coefs_m1 = as.data.frame(m1$coef) %>% tibble::rownames_to_column()
+coefs_m3 = as.data.frame(m3$coef) %>% tibble::rownames_to_column()
+
+coefs_m1 %>% left_join(coefs_m3)
+```
+
+```{r}
+predict(m3, head(test_baked), type="response")
+```
+
+**But,** we still need to bake the testing set before calling the predict function. **What if we don't want to call this bake function anymore ?**
+
+## Use Workflows and parsnip to specify model
+
+We can define a workflow that first prepares the data and the goes into the model to either fit or predict.
+
+A list of models that work with parsnip is provided here: https://www.tidymodels.org/find/parsnip/
+
+```{r}
+# Copy paste from above:
+rec_4 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    prep()
+```
+
+```{r}
+bake(rec_4, head(training_set, 4))
+```
+
+Along with the *workflows* package, we can define a whole .. workflow. This will only define the workflow. No fit is done at this point
+
+```{r}
+m4_mod = poisson_reg() %>%
+  set_engine("glm")
+
+m4_wflow <- 
+  workflow() %>% 
+  add_recipe(rec_4) %>%
+  add_model(m4_mod, formula = ClaimNb ~ Power + Gas + Region + Brand + offset(log(Exposure))) # Formula of the model
+  
+m4_wflow
+```
+
+We can fit, using the function fit.
+
+The fit will consist in "baking" the data using the provided recipe, and estimate the coefficients of the GLM
+
+```{r}
+m4_fit <- fit(m4_wflow, data = training_set)
+```
+
+```{r}
+# extract_fit_engine(m4_fit) is the GLM object
+# We can call the summary function on it
+summary(extract_fit_engine(m4_fit))
+```
+
+What if we want to predict claim frequencies from the testing set ?
+
+```{r}
+predict(m4_fit, head(testing_set, 4))
+```
+
+Do the predictions match what we've done before ?
+
+```{r}
+max(abs(predict(m4_fit, testing_set) - predict(m1, testing_set, type="response")))
+```
+
+What if the new data comes in as a text file ? Do we need to specify what variables are factors ?
+
+```{r}
+new_data = data.frame(
+    "Exposure" = 0.8,
+    "Power" = 'f',
+    "Brand" = "other",
+    "Gas" = "Regular",
+    "Region" = "Centre"
+    )
+
+predict(m4_fit, new_data)
+```
+
+## Build Model with all features 
+
+Now that we have understood how to build GLM models with workflows and recipes, we can use all the variables from the dataset. We will use our learnings from the session on GBM to include some interaction terms.
+
+```{r}
+rec_5 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    prep()
+
+m5_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m5_wflow <- 
+  workflow() %>% 
+  add_model(m5_mod, formula = ClaimNb ~ offset(log(Exposure)) + 
+                                        Power + 
+                                        Gas + 
+                                        Region + 
+                                        Brand + 
+                                        Gas * Power + 
+                                        Gas * Region) %>% # Formula of the model
+  add_recipe(rec_5)
+m5_fit = m5_wflow %>% fit(training_set)
+```
+
+```{r}
+summary(extract_fit_engine(m5_fit))
+```
+
+### Cross-validation
+We will use cross-validation to find the relevant features to keep and how to bin the variables.
+
+```{r}
+folds = training_set %>% vfold_cv(strata = ClaimNb, v = 5)
+```
+
+```{r}
+res = fit_resamples(m5_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+```
+
+```{r}
+collect_metrics(res)
+```
+
+### Without interactions
+
+
+```{r}
+rec_6 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    prep()
+
+m6_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m6_wflow <- 
+  workflow() %>% 
+  add_model(m6_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec_6)
+m6_fit = m6_wflow %>% 
+    fit(training_set)
+```
+
+```{r}
+res = fit_resamples(m6_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+
+collect_metrics(res)
+```
+
+We will not keep the interaction for now..
+
+We can try to merge some of the levels that appear to be not significantly different.
+
+### Group some Brands
+
+```{r}
+rec_7 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    prep()
+
+m7_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m7_wflow <- 
+  workflow() %>% 
+  add_model(m7_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec_7)
+
+res7 = fit_resamples(m7_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res7)
+```
+
+```{r}
+m7_fit = m7_wflow %>% 
+    fit(training_set)
+summary(extract_fit_engine(m7_fit))
+```
+
+### Group some levels of Power
+
+For example, one could regroup levels e-f-g-h of variable power.
+
+```{r}
+rec_8 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, "e-f-g-h" = c("e", "f", "g", "h"))) %>%
+    prep()
+
+m8_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m8_wflow <- 
+  workflow() %>% 
+  add_model(m8_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec_8)
+
+res8 = fit_resamples(m8_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res8)
+```
+
+```{r}
+m8_fit = m8_wflow %>% 
+    fit(training_set)
+summary(extract_fit_engine(m8_fit))
+```
+
+Let us try a different regrouping:
+
+```{r}
+rec_8 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, "d-e" = c("d", "e"), "f-g-h" = c("f", "g", "h"))) %>%
+    prep()
+
+m8_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m8_wflow <- 
+  workflow() %>% 
+  add_model(m8_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec_8)
+
+res8 = fit_resamples(m8_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res8)
+```
+
+But it cross-validation error increases.
+Finally, let us regroup the some other levels
+
+```{r}
+rec_9 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW",
+                                                           "Opel, General Motors or Ford",
+                                                           "other", 
+                                                           "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "e-f-g-h" = c("e", "f", "g", "h"),
+                                                 "i-j-k-l-m" = c("i", "j", "k", "l", "m"),
+                                                 "n-o" = c("n", "o")
+                                             )) %>%
+    prep()
+
+m9_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m9_wflow <- 
+  workflow() %>% 
+  add_model(m9_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec_9)
+
+res9 = fit_resamples(m9_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res9)
+```
+
+```{r}
+m9_fit = m9_wflow %>% 
+    fit(training_set)
+summary(extract_fit_engine(m9_fit))
+```
+
+```{r}
+rec <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "e-f-g-h" = c("e", "f", "g", "h"),
+                                                 "i-j-k-l-m" = c("i", "j", "k", "l", "m"),
+                                                 "n-o" = c("n", "o")
+                                                )) %>%
+    step_mutate(Region = forcats::fct_collapse(Region, 
+                                                 "A" = c("Pays-de-la-Loire", "Poitou-Charentes", "Aquitaine")
+                                                )) %>%
+    prep()
+
+m_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m10_wflow <- 
+  workflow() %>% 
+  add_model(m_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec)
+
+res10 = fit_resamples(m10_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res10)
+```
+
+## Consider the continuous variables 
+
+Let us first add the variables without any preprocessing.
+
+```{r}
+rec <- recipe(ClaimNb ~ DriverAge + CarAge + Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "e-f-g-h" = c("e", "f", "g", "h"),
+                                                 "i-j-k-l-m" = c("i", "j", "k", "l", "m"),
+                                                 "n-o" = c("n", "o")
+                                                )) %>%
+    step_mutate(Region = forcats::fct_collapse(Region, 
+                                                 "A" = c("Pays-de-la-Loire", "Poitou-Charentes", "Aquitaine")
+                                                )) %>%
+    prep()
+
+m_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m10_wflow <- 
+  workflow() %>% 
+  add_model(m_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec)
+
+res10 = fit_resamples(m10_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res10)
+```
+
+```{r}
+m10_fit = m10_wflow %>% 
+    fit(training_set)
+summary(extract_fit_engine(m10_fit))
+```
+
+One possibility is to add polynomial terms. We then need to find the optimal degree of the polynomial. For example, let us consider a polynomial for DriverAge and a polynomial for CarAge
+
+```{r}
+rec <- recipe(ClaimNb ~ DriverAge + CarAge + Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "e-f-g-h" = c("e", "f", "g", "h"),
+                                                 "i-j-k-l-m" = c("i", "j", "k", "l", "m"),
+                                                 "n-o" = c("n", "o")
+                                                )) %>%
+    step_mutate(Region = forcats::fct_collapse(Region, 
+                                                 "A" = c("Pays-de-la-Loire", "Poitou-Charentes", "Aquitaine")
+                                                )) %>%
+    step_poly(DriverAge, degree=2) %>%
+    step_poly(CarAge, degree=2) %>%
+    prep()
+
+m_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m11_wflow <- 
+  workflow() %>% 
+  add_model(m_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec)
+
+res11 = fit_resamples(m11_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res11)
+```
+
+We can change the degree. After several trial and error we can find...
+
+```{r}
+rec <- recipe(ClaimNb ~ DriverAge + CarAge + Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "e-f-g-h" = c("e", "f", "g", "h"),
+                                                 "i-j-k-l-m" = c("i", "j", "k", "l", "m"),
+                                                 "n-o" = c("n", "o")
+                                                )) %>%
+    step_mutate(Region = forcats::fct_collapse(Region, 
+                                                 "A" = c("Pays-de-la-Loire", "Poitou-Charentes", "Aquitaine")
+                                                )) %>%
+    step_poly(DriverAge, degree=7) %>%
+    step_poly(CarAge, degree=2) %>%
+    prep()
+
+m_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m11_wflow <- 
+  workflow() %>% 
+  add_model(m_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec)
+
+res11 = fit_resamples(m11_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res11)
+```
+
+```{r}
+m11_fit = m11_wflow %>% 
+    fit(training_set)
+summary(extract_fit_engine(m11_fit))
+```
+
+Another possibility was to bin the continuous variables. For example, here on DriverAge.
+
+```{r}
+rec <- recipe(ClaimNb ~ DriverAge + CarAge + Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "e-f-g-h" = c("e", "f", "g", "h"),
+                                                 "i-j-k-l-m" = c("i", "j", "k", "l", "m"),
+                                                 "n-o" = c("n", "o")
+                                                )) %>%
+    step_mutate(Region = forcats::fct_collapse(Region, 
+                                                 "A" = c("Pays-de-la-Loire", "Poitou-Charentes", "Aquitaine")
+                                                )) %>%
+    step_discretize(DriverAge, num_breaks=25, min_unique = 2) %>%
+    step_poly(CarAge, degree=2) %>%
+    prep()
+
+m_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m12_wflow <- 
+  workflow() %>% 
+  add_model(m_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec)
+
+res12 = fit_resamples(m12_wflow,
+                    resamples = folds,
+                    metrics = metric_set(poisson_log_loss))
+collect_metrics(res12)
+```
+
+```{r}
+m12_fit = m12_wflow %>% 
+    fit(training_set)
+summary(extract_fit_engine(m12_fit))
+```
+
+## Comparison with other models
+
+We can compare with the previous models from the previous sessions. Note that we have NOT used the variable Density here.
+Let us use our best model.
+
+```{r}
+rec <- recipe(ClaimNb ~ DriverAge + CarAge + Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(Brand = forcats::fct_collapse(Brand, A = c("Fiat", "Mercedes, Chrysler or BMW", 
+                                                     "Opel, General Motors or Ford",
+                                                     "other", 
+                                                     "Volkswagen, Audi, Skoda or Seat"))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "e-f-g-h" = c("e", "f", "g", "h"),
+                                                 "i-j-k-l-m" = c("i", "j", "k", "l", "m"),
+                                                 "n-o" = c("n", "o")
+                                                )) %>%
+    step_mutate(Region = forcats::fct_collapse(Region, 
+                                                 "A" = c("Pays-de-la-Loire", "Poitou-Charentes", "Aquitaine")
+                                                )) %>%
+    step_poly(DriverAge, degree=7) %>%
+    step_poly(CarAge, degree=2) %>%
+    prep()
+
+m_mod = poisson_reg() %>%
+  set_engine("glm") 
+
+m11_wflow <- 
+  workflow() %>% 
+  add_model(m_mod, formula = ClaimNb ~ offset(log(Exposure)) + . - Exposure) %>% # Formula of the model
+  add_recipe(rec)
+
+m11_fit = m11_wflow %>% 
+    fit(training_set)
+
+predt = predict(m11_fit, testing_set)
+```
+
+```{r}
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb,
+    log = TRUE)) - sum(dpois(x = testing_set$ClaimNb, lambda = pull(predt, ".pred"), log = TRUE)))
+```
+
+As expected, we are far off compared to the GBM (due to the model itself and the missing variable Density).
+
+# Useful links
+
+- https://raw.githubusercontent.com/rstudio/cheatsheets/main/factors.pdf
+- https://www.tidymodels.org/index.html
+- https://parsnip.tidymodels.org/
+- https://recipes.tidymodels.org/index.html
+
