@@ -99,7 +99,7 @@ rpart.plot(m0_rpart,
 ```
 
 ```{r}
-# Or using the rattle package
+# For information - Or using the rattle package
 
 fancyRpartPlot(m0_rpart, split.col="black",nn.col="black", 
                caption="", digits=2)
@@ -244,6 +244,10 @@ printcp(m1_rpart)
 ```
 
 ```{r}
+summary(m1_rpart)
+```
+
+```{r}
 plotcp(x = m1_rpart, minline = TRUE, col = "red")
 ```
 
@@ -263,6 +267,7 @@ scale_x_continuous(name = "CP") + scale_y_continuous(name = "xerror") + theme_bw
 If we take the value of cp that minimizes the error, we find
 
 ```{r}
+# A verifier
 cp_star = m1_rpart$cptable[which.min(m1_rpart$cptable[, 4]), 1]
 cp_star
 ```
@@ -334,7 +339,12 @@ pred = lapply(bagg_cart, function(X) {
 })
 
 pred = do.call(cbind, pred)
+pred
+```
+
+```{r}
 pred = apply(pred, 1, mean)
+pred
 ```
 
 ```{r}
