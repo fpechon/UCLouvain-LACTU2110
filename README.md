@@ -4,23 +4,9 @@
 
 This code was build using R 4.3.2. 
 If working on Windows, Rtools 4.3 is required to build some of the packages we will use.
-We will use `renv` to handle the R package dependencies. 
+We will use `renv` to handle the R package dependencies.
+Running `renv::restore()` will install all required packages.
 
-We will also rely on pre-commit, which requires a python installation. This can be done using the following
-
-- install miniconda if you don’t have it already: `reticulate::install_miniconda()`. This needs reticulate >= 1.14.
-- install the pre-commit framework with `precommit::install_precommit()` into the conda environment r-precommit. Do not install other packages into this environment.
-
-Then, in a fresh R session:
-
-```
-# once in every git repo either
-# * after cloning a repo that already uses pre-commit or
-# * if you want introduce pre-commit to this repo
-precommit::use_precommit()
-```
-
-See also: https://lorenzwalthert.github.io/precommit/dev/articles/precommit.html
 
 ## Materiel du cours.
 
