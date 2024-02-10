@@ -31,6 +31,7 @@ require("broom")
 require("stringi")
 require("arrow")
 require("patchwork")
+require("leaflet")
 ```
 
 In this jupyter notebook, we will use the following options to set the width and height of our plots.
@@ -669,68 +670,87 @@ We first need to obtain the shape files (which contain the borders of each admin
 
 ```{r}
 # From http://www.diva-gis.org/gData
-area <- rgdal::readOGR(
+area <- sf::st_read(
   "shapefiles/FRA_adm1.shp",
-  use_iconv = TRUE,
-  encoding = "UTF-8"
+  options = "ENCODING=UTF8"
 )
 
-# Note that the tidy function will remove the data.
-area_tidy <- tidy(area) # package broom
-
-# Plot an "empty" map
-ggplot(area_tidy, aes(x = long, y = lat, group = group)) +
-  geom_polygon(color = "black", size = 0.1, fill = "lightgrey") +
-  coord_equal() +
-  theme_void()
+leaflet(area) %>%
+  addPolygons(
+    color = "#444444", weight = 1,
+    opacity = 1.0, fillOpacity = 0.5,
+    highlightOptions = highlightOptions(
+      color = "white", weight = 2,
+      bringToFront = TRUE
+    )
+  ) %>%
+  addTiles()
 ```
 
 We are now going to include our data into the map
 
 ```{r}
-# First we re-include the data (that disappeared with the tidy function)
-area$id <- row.names(area)
-area_tidy2 <- area_tidy %>% full_join(area@data, by = "id")
-
-# Because of accents ...
-area_tidy2$NAME_1 <- stri_trans_general(
-  str = area_tidy2$NAME_1,
-  id = "Latin-ASCII"
-)
-
-# Which computed data do we want ?
-data_to_add <- region_summary[, c("Region", "totalExposure", "Obs.Claim.Freq")]
-# Merge it
-area_tidy2 <- area_tidy2 %>% full_join(data_to_add, by = c("NAME_1" = "Region"))
-
-# Very important: Do not forget to sort by "order" variable.
-area_tidy2 <- area_tidy2 %>% arrange(order)
-
-# Finally, plot the data: the claim frequencies
-p1 <- ggplot(area_tidy2, aes(long, lat, group = group, fill = Obs.Claim.Freq)) +
-  ggtitle("Observed Claim Frequencies") +
-  geom_polygon(color = "black") +
-  scale_fill_gradient(low = "green", high = "red", name = "Obs. Claim Freq.") +
-  xlab("Longitude") +
-  ylab("Latitude") +
-  theme_void()
-
-# and the exposures (on a log-scale)...
-p2 <- ggplot(
-  area_tidy2,
-  aes(long, lat, group = group, fill = log(totalExposure))
-) +
-  ggtitle("log Exposures in years") +
-  geom_polygon(color = "black") +
-  scale_fill_gradient(low = "green", high = "red", name = "log Exposure") +
-  xlab("Longitude") +
-  ylab("Latitude") +
-  theme_void()
-
-
-# Show them next to each other: Very easy using patchwork package
-p1 + p2
+area_w_data <- area %>% full_join(region_summary, by = c("NAME_1" = "Region"))
 ```
+
+And now use leaflet to plot the data, first the exposure
+```{r}
+colors <- colorNumeric("YlOrRd", area_w_data$totalExposure)
+# Create leaflet map
+leaflet(area_w_data) %>%
+  addPolygons(
+    color = "#444444", weight = 1, smoothFactor = 0.5,
+    opacity = 1.0, fillOpacity = 0.5,
+    fillColor = ~ colors(totalExposure),
+    highlightOptions = highlightOptions(
+      color = "white", weight = 2,
+      bringToFront = TRUE,
+    ),
+    popup = ~ paste(
+      "Region: ", NAME_1, "<br>",
+      "Exposure: ", round(totalExposure, 1)
+    )
+  ) %>%
+  addTiles() %>%
+  leaflet::addLegend(
+    position = "bottomright",
+    pal = colors,
+    values = area_w_data$totalExposure,
+    title = "Total Exposure",
+    labFormat = labelFormat(suffix = ""),
+    opacity = 1
+  )
+```
+
+Finally, plot the claim frequencies
+```{r}
+colors <- colorNumeric("YlOrRd", area_w_data$Obs.Claim.Freq)
+# Create leaflet map
+leaflet(area_w_data) %>%
+  addPolygons(
+    color = "#444444", weight = 1, smoothFactor = 0.5,
+    opacity = 1.0, fillOpacity = 0.5,
+    fillColor = ~ colors(Obs.Claim.Freq),
+    highlightOptions = highlightOptions(
+      color = "white", weight = 2,
+      bringToFront = TRUE,
+    ),
+    popup = ~ paste(
+      "Region: ", NAME_1, "<br>",
+      "Exposure: ", percent(Obs.Claim.Freq)
+    )
+  ) %>%
+  addTiles() %>%
+  leaflet::addLegend(
+    position = "bottomright",
+    pal = colors,
+    values = area_w_data$Obs.Claim.Freq,
+    title = "Obs. Claoim Frequency",
+    labFormat = labelFormat(suffix = ""),
+    opacity = 1
+  )
+```
+
 
 ### Density
 The Density represents here the density of the population at the place of residence.
