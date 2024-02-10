@@ -10,9 +10,11 @@ In this document, we will briefly introduce R and installing all the required pa
 
 ## Installing the required packages
 
-The following commands will load the package if they are already installed. If they are not yet installed, they will be installed and loaded afterwards. Note that for Windows users, Rtools is required for some packages (e.g., CASdatasets). This list may not be exhaustive and other packages may be required in other notebooks.
+The following commands will load the package if they are already installed. If they are not installed, you should install them using
+`renv::restore()`.
 
-```{r}
+
+```{r include=FALSE}
 require("CASdatasets")
 require("ggplot2")
 require("mgcv")
