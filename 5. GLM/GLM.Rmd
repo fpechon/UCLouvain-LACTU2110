@@ -250,10 +250,10 @@ predict(m1, head(testing_set, 4), type="response")
 Let us compare the previous model with the following model, which, some call a "Poisson rate model")
 
 ```{r}
-m2 = glm(ClaimNb/Exposure ~ Power + Gas + Brand + Region, 
+m2 = suppressWarnings(glm(ClaimNb/Exposure ~ Power + Gas + Brand + Region, 
          data = training_set,
          weight = training_set$Exposure,
-         family = poisson(link = log))
+         family = poisson(link = log)))
 summary(m2)
 ```
 
@@ -349,7 +349,7 @@ predict(m3, head(test_baked), type="response")
 
 ## Use Workflows and parsnip to specify model
 
-We can define a workflow that first prepares the data and the goes into the model to either fit or predict.
+We can define a workflow that first prepares the data and then goes into the model to either fit or predict.
 
 A list of models that work with parsnip is provided here: https://www.tidymodels.org/find/parsnip/
 
@@ -423,7 +423,7 @@ predict(m4_fit, new_data)
 
 ## Build Model with all features 
 
-Now that we have understood how to build GLM models with workflows and recipes, we can use all the variables from the dataset. We will use our learnings from the session on GBM to include some interaction terms.
+Now that we have understood how to build GLM models with workflows and recipes, we can use all the variables from the dataset. We will use our (future) learnings from the session on GBM to include some interaction terms.
 
 ```{r}
 rec_5 <- recipe(ClaimNb ~ Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
@@ -850,8 +850,8 @@ summary(extract_fit_engine(m12_fit))
 
 ## Comparison with other models
 
-We can compare with the previous models from the previous sessions. Note that we have NOT used the variable Density here.
-Let us use our best model.
+Note that we have NOT used the variable Density here.
+Let us use our best model. We will use this as comparison for our future sessions.
 
 ```{r}
 rec <- recipe(ClaimNb ~ DriverAge + CarAge + Power + Gas + Region + Brand + Exposure, data = training_set) %>% # Which columns do we need ?
@@ -894,7 +894,48 @@ predt = predict(m11_fit, testing_set)
     log = TRUE)) - sum(dpois(x = testing_set$ClaimNb, lambda = pull(predt, ".pred"), log = TRUE)))
 ```
 
-As expected, we are far off compared to the GBM (due to the model itself and the missing variable Density).
+## Partial dependencies
+
+We can visualize our model, with partial dependencies (more on how it is constructed later).
+
+```{r}
+library(ggplot2)
+library(scales)
+
+partial_dep = tibble(DriverAge = sort(unique(training_set$DriverAge)), pred=0)
+
+for (row in 1:nrow(partial_dep)){
+    driver_age = as.numeric(partial_dep[row, "DriverAge"])
+    
+    partial_dep[row, "pred"] = mean((predict(m11_fit, 
+                                             new_data = training_set 
+                                             %>% mutate(DriverAge = driver_age))/training_set$Exposure)$.pred)
+}
+
+ggplot(partial_dep, aes(x=DriverAge, y=pred)) + 
+geom_point() + 
+geom_line()+ 
+scale_x_continuous(name="Driver Age")+
+scale_y_continuous(name = "Predicted Claim Frequency", labels=label_percent(accuracy=0.01))
+```
+
+```{r}
+partial_dep = tibble(CarAge = sort(unique(training_set$CarAge)), pred=0)
+
+for (row in 1:nrow(partial_dep)){
+    car_age = as.numeric(partial_dep[row, "CarAge"])
+    
+    partial_dep[row, "pred"] = mean((predict(m11_fit, 
+                                             new_data = training_set
+                                             %>% mutate(CarAge = car_age))/training_set$Exposure)$.pred)
+}
+
+ggplot(partial_dep, aes(x=CarAge, y=pred)) + 
+geom_point() + 
+geom_line()+ 
+scale_x_continuous(name="Car Age")+
+scale_y_continuous(name = "Predicted Claim Frequency", labels=label_percent(accuracy=0.01))
+```
 
 # Useful links
 
