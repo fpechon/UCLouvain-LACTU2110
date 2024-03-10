@@ -23,10 +23,12 @@ Then, you can activate the environment with `conda activate lactu2110` and launc
 
 ### Long version
 
-`conda create --name lactu2110 r-base`
-`conda activate lactu2110`
-`conda install jupyter`
-`conda install -c r r-irkernel`
+```
+conda create --name lactu2110 r-base
+conda activate lactu2110
+conda install jupyter
+conda install -c r r-irkernel
+```
 
 Then, you can launch jupyter notebook with
 `jupyter notebook`
