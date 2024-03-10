@@ -8,11 +8,11 @@
 
 For Windows, Rtools : https://cran.r-project.org/bin/windows/Rtools/ (Make sure to check the box add to path when installing Rtools)
 
-## Conda environment (optionnal)
+## Conda environment (optional)
 
 If you want to use a conda environment, you can use the following commands to create a R environment, install jupyter notebook and allow use of R in jupyter notebook
 
-### Short version 
+### Short version
 
 You are located in the directory containing environment.yml from this repo:
 `conda env create -f environment.yml`
@@ -23,7 +23,7 @@ Then, you can activate the environment with `conda activate lactu2110` and launc
 
 ### Long version
 
-```
+```python
 conda create --name lactu2110 r-base
 conda activate lactu2110
 conda install jupyter
