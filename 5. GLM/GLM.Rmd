@@ -250,10 +250,10 @@ predict(m1, head(testing_set, 4), type="response")
 Let us compare the previous model with the following model, which, some call a "Poisson rate model")
 
 ```{r}
-m2 = glm(ClaimNb/Exposure ~ Power + Gas + Brand + Region, 
+m2 = suppressWarnings(glm(ClaimNb/Exposure ~ Power + Gas + Brand + Region, 
          data = training_set,
          weight = training_set$Exposure,
-         family = poisson(link = log))
+         family = poisson(link = log)))
 summary(m2)
 ```
 
