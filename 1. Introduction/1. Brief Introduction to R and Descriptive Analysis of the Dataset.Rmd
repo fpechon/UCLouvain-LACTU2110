@@ -24,15 +24,15 @@ if (!require("gridExtra")) install.packages("gridExtra")
 if (!require("visreg")) install.packages("visreg")
 if (!require("MASS")) install.packages("MASS")
 if (!require("plotrix")) install.packages("plotrix")
-if (!require("rgeos")) install.packages("rgeos")
-if (!require("rgdal")) install.packages("rgdal")
 if (!require("xtable")) install.packages("xtable")
-if (!require("maptools")) install.packages("maptools")
 if (!require("scales")) install.packages("scales")
 if (!require("broom")) install.packages("broom")
 if (!require("stringi")) install.packages("stringi")
 if (!require("arrow")) install.packages("arrow")
 if (!require("patchwork")) install.packages("patchwork")
+if (!require("sf")) install.packages("sf")
+if (!require("htmlwidgets")) install.packages("htmlwidgets")
+if (!require("leaflet")) install.packages("leaflet")
 
 
 require("CASdatasets")
@@ -44,15 +44,14 @@ require("dplyr")
 require("visreg")
 require("MASS")
 require("plotrix")
-require("rgdal")
-require("rgeos")
 require("xtable")
-require("maptools")
 require("scales")
 require("broom")
 require("stringi")
 require("arrow")
-require("patchwork");
+require("patchwork")
+require("sf")
+require("leaflet");
 ```
 
 In this jupyter notebook, we will use the following options to set the width and height of our plots.
@@ -77,18 +76,21 @@ To keep it simple and illustrative, we will only keep a subset of this dataset. 
 We will use the **tidyverse** univers in this course, as it can be easier to read (and writing clear code is important!). Subsetting can be done with the **filter** function.
 
 ```{r}
-dataset = freMTPLfreq %>% filter(Exposure<=1 & Exposure >= 0 & CarAge<=25)
+dataset <- freMTPLfreq %>% filter(Exposure <= 1 & Exposure >= 0 & CarAge <= 25)
 ```
 
 Note the *pipe* operator which allows to chain operations. We could also have written the following. We check that we obtain the same result with the **all.equal(dataset, dataset_alternative)** function. To save some memory we then remove the alternative dataset.
 
 ```{r}
-dataset_alternative = freMTPLfreq %>% 
-                                filter(Exposure <= 1) %>% 
-                                filter(Exposure >= 0) %>% 
-                                filter(CarAge<=25)
+dataset_alternative <- freMTPLfreq %>%
+  filter(Exposure <= 1) %>%
+  filter(Exposure >= 0) %>%
+  filter(CarAge <= 25)
 
-sprintf("Are the two datasets equal ? %s", ifelse(all.equal(dataset, dataset_alternative), "Yes", "No"))
+sprintf(
+  "Are the two datasets equal ? %s",
+  ifelse(all.equal(dataset, dataset_alternative), "Yes", "No")
+)
 rm(dataset_alternative)
 ```
 
@@ -101,7 +103,7 @@ We will save the dataset into a *parquet* file, so we don't need to load the CAS
 For those that could not install this package, now is the time to load the provided *parquet* file.
 
 ```{r}
-dataset = read_parquet(file = "../data/dataset.parquet")
+dataset <- read_parquet(file = "../data/dataset.parquet")
 ```
 
 ### Checking the dataset
@@ -160,7 +162,7 @@ It appears that in this dataset the variable *PolicyID* is a **factor**. A facto
 To remove unused levels, we can use on the function **droplevels**.
 
 ```{r}
-dataset$PolicyID = droplevels(dataset$PolicyID)
+dataset$PolicyID <- droplevels(dataset$PolicyID)
 ```
 
 ### Exposure in month
@@ -169,54 +171,73 @@ We can compute the total exposure by summing the policyholders' exposures.
 Here we find:
 
 ```{r}
-sprintf("%s years",scales::number(sum(dataset$Exposure), accuracy = 0.1))
+sprintf("%s years", label_number(accuracy = 0.1)(sum(dataset$Exposure)))
 ```
 
 We can show the number of months of exposure on a table. The function *cut* allows to categorize (bin) a numerical variable. We can specify where to 'break' and give a name to each level using the *labels* argument. The output is a factor variable.
 
 ```{r}
-table_exposures = table(cut(dataset$Exposure, breaks = seq(from = 0, to = 1,by = 1/12), labels = 1:12))
+table_exposures <- table(cut(dataset$Exposure,
+  breaks = seq(from = 0, to = 1, by = 1 / 12),
+  labels = 1:12
+))
 table_exposures
 ```
 
 Using the function *prop.table*, it is possible to represent this information in relative terms show the number of months of exposure on a table.
 
 ```{r}
-Exposures_prop = prop.table(table_exposures)
-round(Exposures_prop, 4)*100
+exposures_prop <- prop.table(table_exposures)
+round(exposures_prop, 4) * 100
 ```
 
 Alternatively, we can use a barplot, using **ggplot2** !
 
 ```{r}
-ggplot(dataset)+geom_bar(aes(x=cut(Exposure,
-                                   breaks = seq(from = 0, to = 1,by = 1/12), labels = 1:12))) + 
-  scale_x_discrete(name = "Number of months") + 
-  scale_y_continuous(name = "Number of Policies", label = label_number()) + 
+ggplot(dataset) +
+  geom_bar(
+    aes(x = cut(Exposure,
+      breaks = seq(from = 0, to = 1, by = 1 / 12),
+      labels = 1:12
+    ))
+  ) +
+  scale_x_discrete(name = "Number of months") +
+  scale_y_continuous(name = "Number of Policies", label = label_number()) +
   ggtitle("Exposure in months")
 ```
 
 What if we also want to show the percentage on the bars ?
 
 ```{r}
-ggplot(dataset, aes(x=cut(Exposure, breaks = seq(from = 0, to = 1,by = 1/12), labels = 1:12), 
-                    label = scales::percent(prop.table(after_stat(count)), accuracy = 0.1)))+
-  geom_bar() + 
-  geom_text(stat = 'count',
-            vjust = -0.5,
-            size = 3) +
-  scale_x_discrete(name = "Number of months") + 
-  scale_y_continuous(name = "Number of Policies", 
-                     label = label_number()) + 
+ggplot(dataset, aes(
+  x = cut(Exposure, breaks = seq(from = 0, to = 1, by = 1 / 12), labels = 1:12),
+  label = scales::percent(prop.table(after_stat(count)), accuracy = 0.1)
+)) +
+  geom_bar() +
+  geom_text(
+    stat = "count",
+    vjust = -0.5,
+    size = 3
+  ) +
+  scale_x_discrete(name = "Number of months") +
+  scale_y_continuous(
+    name = "Number of Policies",
+    label = label_number()
+  ) +
   ggtitle("Exposure in months")
 ```
 
 Note that a barplot is used to plot factor variables (categorical variables). In our case, we categorized the variable Exposure using the function *cut*. If we do not want to categorize this variable, we should use a histogram. We can specify the number of bins (= 12) or the binwidth (= 1/12).
 
 ```{r}
-ggplot(dataset, aes(x=Exposure))+geom_histogram(binwidth =1/12, fill='gray', color='white') +
-  scale_x_continuous(name = "Exposure in fraction of years", breaks=seq(0,1,1/12), labels = round(seq(0,1,1/12), 3))+
-  scale_y_continuous(name = 'Number of Polices', labels = label_number()) + 
+ggplot(dataset, aes(x = Exposure)) +
+  geom_histogram(binwidth = 1 / 12, fill = "gray", color = "white") +
+  scale_x_continuous(
+    name = "Exposure in fraction of years",
+    breaks = seq(0, 1, 1 / 12),
+    labels = round(seq(0, 1, 1 / 12), 3)
+  ) +
+  scale_y_continuous(name = "Number of Polices", labels = label_number()) +
   ggtitle("Exposure in fraction of years")
 ```
 
@@ -225,22 +246,27 @@ If you are not familiar with ggplot, I could recommend this cheat-sheet: https:/
 ### Number of claim : ClaimNb
 
 ```{r}
-ggplot(dataset, aes(x=ClaimNb))+
-  geom_bar()+
-  geom_label(stat='count', 
-             aes(label =  percent(prop.table(after_stat(count)), 
-                                     accuracy = 0.01)),
-             vjust = 0.5)+
-  scale_x_continuous(name = "Number of Claims")+
-  scale_y_continuous(name = "Number of Polices", 
-                     labels = label_number())+
+ggplot(dataset, aes(x = ClaimNb)) +
+  geom_bar() +
+  geom_label(
+    stat = "count",
+    aes(label = percent(prop.table(after_stat(count)),
+      accuracy = 0.01
+    )),
+    vjust = 0.5
+  ) +
+  scale_x_continuous(name = "Number of Claims") +
+  scale_y_continuous(
+    name = "Number of Polices",
+    labels = label_number()
+  ) +
   ggtitle("Proportion of policies by number of claims")
 ```
 
 We can compute the average claim frequency in this portfolio, taking into account the different exposures.
 
 ```{r}
-scales::percent(sum(dataset$ClaimNb) / sum(dataset$Exposure), accuracy = 0.01)
+label_percent(accuracy = 0.01)(sum(dataset$ClaimNb) / sum(dataset$Exposure))
 ```
 
 Let us now look at the other variables.
@@ -265,60 +291,88 @@ Remember however, that in insurance, exposures may differ from one policyholder 
 Check out the cheatsheet https://github.com/rstudio/cheatsheets/blob/main/data-transformation.pdf
 
 ```{r}
-Power.summary = dataset %>% group_by(Power) %>% summarise(totalExposure = sum(Exposure),
-                                                          Number.Observations = length(Exposure))
-Power.summary
+power_summary <- dataset %>%
+  group_by(Power) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure)
+  )
+power_summary
 ```
 
 We can show this on a plot as well:
 
 ```{r}
-plot_power_expo = ggplot(Power.summary, aes(x=Power, 
-                          y=totalExposure, 
-                          fill=Power, 
-                          color=Power, 
-                          label=scales::number(totalExposure))) + 
-  geom_bar(stat="identity")+
-  geom_text(stat='identity',  vjust=-0.5)+
-  scale_y_continuous(name = "Exposure in years", labels = scales::number, expand = expansion(mult = c(0, .15)))+
-  scale_colour_discrete(guide = "none")+
-  scale_fill_discrete(guide="none")
+plot_power_expo <- ggplot(power_summary, aes(
+  x = Power,
+  y = totalExposure,
+  fill = Power,
+  color = Power,
+  label = label_number()(totalExposure)
+)) +
+  geom_bar(stat = "identity") +
+  geom_text(stat = "identity", vjust = -0.5) +
+  scale_y_continuous(
+    name = "Exposure in years",
+    labels = label_number(),
+    expand = expansion(mult = c(0, .15))
+  ) +
+  scale_colour_discrete(guide = "none") +
+  scale_fill_discrete(guide = "none")
 plot_power_expo
 ```
 
 Let us now look at the observed claim frequency in each level
 
 ```{r}
-Power.summary = dataset %>% group_by(Power) %>% summarise(totalExposure = sum(Exposure),
-                                                          Number.Observations = length(Exposure),
-                                                          Number.Claims = sum(ClaimNb),
-                                                          Obs.Claim.Frequency = sum(ClaimNb)/sum(Exposure))
-Power.summary
+power_summary <- dataset %>%
+  group_by(Power) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Frequency = sum(ClaimNb) / sum(Exposure)
+  )
+power_summary
 ```
 
 We can compute the ratio to the portfolio claim frequency and plot the claim frequencies.
 
 ```{r}
-portfolio.cf = sum(dataset$ClaimNb)/ sum(dataset$Exposure)
+portfolio_cf <- sum(dataset$ClaimNb) / sum(dataset$Exposure)
 # Can also be written as
-portfolio.cf = with(dataset, sum(ClaimNb)/sum(Exposure))
+portfolio_cf <- with(dataset, sum(ClaimNb) / sum(Exposure))
 
-plot_power_claimfreq = ggplot(Power.summary, aes(x=Power, 
-                          y=Obs.Claim.Frequency,
-                          color=Obs.Claim.Frequency,
-                          fill=Obs.Claim.Frequency,
-                          label = percent(Obs.Claim.Frequency, accuracy = 0.01))) + 
-  geom_bar(stat='identity') + 
-  geom_hline(aes(yintercept=portfolio.cf), color="black", linewidth = 2, linetype="dashed", alpha = 0.33) +
-  geom_label(vjust=-0.21, fill="white", alpha = 0.25)+
-  annotate(geom="text", 
-           x='m', y=portfolio.cf, 
-           vjust=-0.5, 
-           label=paste("Average claim freq. of portfolio: ", percent(portfolio.cf, accuracy = 0.01)), 
-           color="black")+
-  scale_y_continuous(name = "Observed Claim Frequency", labels = percent_format(accuracy = 0.01), 
-                    expand = expansion(mult = c(0, .15)))+
-  theme(legend.position = 'none')
+plot_power_claimfreq <- ggplot(power_summary, aes(
+  x = Power,
+  y = Obs.Claim.Frequency,
+  color = Obs.Claim.Frequency,
+  fill = Obs.Claim.Frequency,
+  label = percent(Obs.Claim.Frequency, accuracy = 0.01)
+)) +
+  geom_bar(stat = "identity") +
+  geom_hline(aes(yintercept = portfolio_cf),
+    color = "black",
+    linewidth = 2,
+    linetype = "dashed",
+    alpha = 0.33
+  ) +
+  geom_label(vjust = -0.21, fill = "white", alpha = 0.25) +
+  annotate(
+    geom = "text",
+    x = "m", y = portfolio_cf,
+    vjust = -0.5,
+    label = paste(
+      "Average claim freq. of portfolio: ",
+      percent(portfolio_cf, accuracy = 0.01)
+    ),
+    color = "black"
+  ) +
+  scale_y_continuous(
+    name = "Observed Claim Frequency", labels = label_percent(accuracy = 0.01),
+    expand = expansion(mult = c(0, .15))
+  ) +
+  theme(legend.position = "none")
 plot_power_claimfreq
 ```
 
@@ -334,50 +388,74 @@ plot_power_expo / plot_power_claimfreq
 The vehicle age, in years. This is the first continuous variable that we encounter (although it only takes discrete values).
 
 ```{r}
-ggplot(dataset, 
-       aes(x=CarAge)) + geom_bar()  + 
-  scale_x_continuous(name = "Age of the Car", breaks=seq(0,100,5))+
-  scale_y_continuous(name = "Number of Polices", labels=label_number())
+ggplot(
+  dataset,
+  aes(x = CarAge)
+) +
+  geom_bar() +
+  scale_x_continuous(name = "Age of the Car", breaks = seq(0, 100, 5)) +
+  scale_y_continuous(name = "Number of Polices", labels = label_number())
 ```
 
 Alternatively, we can use a histogram, with a binwidth of 1.
 
 ```{r}
-ggplot(dataset, 
-       aes(x=CarAge)) + geom_histogram(binwidth = 1, color = 'black', fill='white')  + 
-  scale_x_continuous(name = "Age of the Car", breaks=seq(0,100,5))+
-  scale_y_continuous(name = "Number of Polices", labels=label_number())
+ggplot(
+  dataset,
+  aes(x = CarAge)
+) +
+  geom_histogram(binwidth = 1, color = "black", fill = "white") +
+  scale_x_continuous(name = "Age of the Car", breaks = seq(0, 100, 5)) +
+  scale_y_continuous(name = "Number of Polices", labels = label_number())
 ```
 
 Again, here, the exposures are not considered on the barplot/histogram. We can use **ddply** to correct this.
 
 ```{r}
-CarAge.summary = dataset %>% group_by(CarAge) %>% summarise(totalExposure = sum(Exposure),
-                                                            Number.Observations = length(Exposure))
-CarAge.summary
+carage_summary <- dataset %>%
+  group_by(CarAge) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure)
+  )
+carage_summary
 ```
 
 Then, we can plot the data onto a barplot, as before.
 
 ```{r}
-ggplot(CarAge.summary, aes(x=CarAge,
-                          y=totalExposure, 
-                          fill=factor(CarAge), 
-                          color=factor(CarAge), 
-                          label=label_number(accuracy=1)(totalExposure))) + 
-  geom_bar(stat="identity")+
-  geom_text(stat='identity', color="black", hjust=0.25, vjust=0.5,  angle=45, check_overlap=TRUE)+
-  scale_x_continuous(breaks = seq(0,100,5))+
-  scale_y_continuous(name = "Exposure in years", 
-                     labels = label_number(), 
-                     expand = expansion(add = c(1000, 0), mult = c(0, .15)))+
-  theme(legend.position = 'none')
+ggplot(carage_summary, aes(
+  x = CarAge,
+  y = totalExposure,
+  fill = factor(CarAge),
+  color = factor(CarAge),
+  label = label_number(accuracy = 1)(totalExposure)
+)) +
+  geom_bar(stat = "identity") +
+  geom_text(
+    stat = "identity",
+    color = "black",
+    hjust = 0.25,
+    vjust = 0.5,
+    angle = 45,
+    check_overlap = TRUE
+  ) +
+  scale_x_continuous(breaks = seq(0, 100, 5)) +
+  scale_y_continuous(
+    name = "Exposure in years",
+    labels = label_number(),
+    expand = expansion(add = c(1000, 0), mult = c(0, .15))
+  ) +
+  theme(legend.position = "none")
 ```
 
 We can see a large difference, specially for new cars, which makes sense ! Indeed, let us look at the Exposure for recent vehicles, using a boxplot for instance.
 
 ```{r}
-ggplot(dataset%>% filter(CarAge<5), aes(x=CarAge, y=Exposure,  group=CarAge)) + 
+ggplot(
+  dataset %>% filter(CarAge < 5),
+  aes(x = CarAge, y = Exposure, group = CarAge)
+) +
   geom_boxplot() +
   ggtitle("Exposure of recent cars")
 ```
@@ -385,55 +463,84 @@ ggplot(dataset%>% filter(CarAge<5), aes(x=CarAge, y=Exposure,  group=CarAge)) +
 Let us now also compute the claim frequencies by age of car and plot them.
 
 ```{r}
-CarAge.summary = dataset %>% group_by(CarAge) %>% summarise(totalExposure = sum(Exposure), 
-                                                             Number.Observations = length(Exposure), 
-                                                             Number.Claims = sum(ClaimNb), 
-                                                             Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
+carage_summary <- dataset %>%
+  group_by(CarAge) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
 
-portfolio.cf = with(dataset, sum(ClaimNb)/ sum(Exposure))
+portfolio_cf <- with(dataset, sum(ClaimNb) / sum(Exposure))
 
-ggplot(CarAge.summary, aes(x=CarAge, 
-                          y=Obs.Claim.Freq,
-                          label = percent(Obs.Claim.Freq, accuracy = 0.01))) + 
-  geom_point() + geom_line()+
-  geom_hline(yintercept=portfolio.cf, color="black", linewidth = 2, linetype="dashed", alpha = 0.33) +
-    annotate(geom="text", 
-           x=20, y=portfolio.cf, 
-           vjust=-0.5, 
-           label=paste("Average claim freq. of portfolio: ", percent(portfolio.cf, accuracy = 0.01)), 
-           color="black")+
-  scale_x_continuous(name = "Age of the Car", breaks=seq(0,100,5))+
-  scale_y_continuous(name = "Observed Claim Frequency", labels = percent_format(accuracy = 0.01))+
-  theme(legend.position = 'none')
+ggplot(carage_summary, aes(
+  x = CarAge,
+  y = Obs.Claim.Freq,
+  label = percent(Obs.Claim.Freq, accuracy = 0.01)
+)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(
+    yintercept = portfolio_cf,
+    color = "black", linewidth = 2,
+    linetype = "dashed",
+    alpha = 0.33
+  ) +
+  annotate(
+    geom = "text",
+    x = 20, y = portfolio_cf,
+    vjust = -0.5,
+    label = paste(
+      "Average claim freq. of portfolio: ",
+      percent(portfolio_cf, accuracy = 0.01)
+    ),
+    color = "black"
+  ) +
+  scale_x_continuous(name = "Age of the Car", breaks = seq(0, 100, 5)) +
+  scale_y_continuous(
+    name = "Observed Claim Frequency",
+    labels = label_percent(accuracy = 0.01)
+  ) +
+  theme(legend.position = "none")
 ```
 
 ### DriverAge
 Similarly to the Age of the Car, we can visualize the Age of the Drivers.
 
 ```{r}
-DriverAge.summary = dataset %>% group_by(DriverAge) %>% summarise(totalExposure = sum(Exposure), 
-                                                                  Number.Observations = length(Exposure), 
-                                                                  Number.Claims = sum(ClaimNb), 
-                                                                  Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
-head(DriverAge.summary,9)
+driverage_summary <- dataset %>%
+  group_by(DriverAge) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
+head(driverage_summary, 9)
 ```
 
 We can show the Exposures by Age of the Driver...
 
 ```{r}
-ggplot(DriverAge.summary, aes(x=DriverAge, y=totalExposure)) + 
-  geom_bar(stat='identity', width=0.8) + 
-  scale_y_continuous(name="Exposure in years", labels = label_number())+
-  scale_x_continuous(name="Age of the Driver", breaks = seq(10,150,10))
+ggplot(driverage_summary, aes(x = DriverAge, y = totalExposure)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  scale_y_continuous(name = "Exposure in years", labels = label_number()) +
+  scale_x_continuous(name = "Age of the Driver", breaks = seq(10, 150, 10))
 ```
 
 ... and the observed claim frequency by Age.
 
 ```{r}
-ggplot(DriverAge.summary, aes(x=DriverAge, y=Obs.Claim.Freq)) + 
-  geom_line()+geom_point()+
-  scale_y_continuous(name="Observed Claim Frequency", labels = percent, breaks = seq(0,0.50,0.05))+
-  scale_x_continuous(name="Age of the Driver", breaks = seq(10,150,10))
+ggplot(driverage_summary, aes(x = DriverAge, y = Obs.Claim.Freq)) +
+  geom_line() +
+  geom_point() +
+  scale_y_continuous(
+    name = "Observed Claim Frequency",
+    labels = percent,
+    breaks = seq(0, 0.50, 0.05)
+  ) +
+  scale_x_continuous(name = "Age of the Driver", breaks = seq(10, 150, 10))
 ```
 
 ### Brand
@@ -445,41 +552,55 @@ levels(dataset$Brand)
 ```
 
 ```{r}
-Brand.summary = dataset %>% group_by(Brand) %>% summarise(totalExposure = sum(Exposure), 
-                                                          Number.Observations = length(Exposure), 
-                                                          Number.Claims = sum(ClaimNb), 
-                                                          Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
-                                          
-Brand.summary
+brand_summary <- dataset %>%
+  group_by(Brand) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
+
+brand_summary
 ```
 
 ```{r}
-ggplot(Brand.summary, aes(x=reorder(Brand,totalExposure), 
-                          y=totalExposure, 
-                          fill=Brand,
-                          label = label_number()(totalExposure))) +
-  geom_bar(stat='identity') +
-  coord_flip()+guides(fill='none')+
-  scale_x_discrete(name = "") + 
-  scale_y_continuous("Exposure in years", 
-                     labels = label_number(), 
-                     expand = expansion(mult = c(0, 0.10)))+
+ggplot(brand_summary, aes(
+  x = reorder(Brand, totalExposure),
+  y = totalExposure,
+  fill = Brand,
+  label = label_number()(totalExposure)
+)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  guides(fill = "none") +
+  scale_x_discrete(name = "") +
+  scale_y_continuous("Exposure in years",
+    labels = label_number(),
+    expand = expansion(mult = c(0, 0.10))
+  ) +
   geom_label()
 ```
 
 Let us now look at the claim frequency by Brand of the car.
 
 ```{r}
-ggplot(Brand.summary, aes(x=reorder(Brand,Obs.Claim.Freq), 
-                          y=Obs.Claim.Freq, 
-                          fill=Brand,
-                          label = percent(Obs.Claim.Freq, accuracy=0.1))) +
-  geom_bar(stat='identity') +
-  geom_label(hjust=+1.2)+
-  coord_flip()+guides(fill='none')+ 
-  ggtitle("Observed Claim Frequencies by Brand of the car")+
-  scale_x_discrete(name = "Brand") + 
-  scale_y_continuous("Observed claim Frequency", labels = label_percent(accuracy = 0.1))
+ggplot(brand_summary, aes(
+  x = reorder(Brand, Obs.Claim.Freq),
+  y = Obs.Claim.Freq,
+  fill = Brand,
+  label = percent(Obs.Claim.Freq, accuracy = 0.1)
+)) +
+  geom_bar(stat = "identity") +
+  geom_label(hjust = +1.2) +
+  coord_flip() +
+  guides(fill = "none") +
+  ggtitle("Observed Claim Frequencies by Brand of the car") +
+  scale_x_discrete(name = "Brand") +
+  scale_y_continuous(
+    "Observed claim Frequency",
+    labels = label_percent(accuracy = 0.1)
+  )
 ```
 
 ### Gas
@@ -491,29 +612,49 @@ levels(dataset$Gas)
 ```
 
 ```{r}
-Gas.summary = dataset %>% group_by(Gas) %>% summarise(totalExposure = sum(Exposure), 
-                                                      Number.Observations = length(Exposure), 
-                                                      Number.Claims = sum(ClaimNb), 
-                                                      Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
-ggplot(Gas.summary, aes(x=Gas, y=totalExposure, fill=Gas, label = number(totalExposure))) + 
-  geom_bar(stat="identity") + 
-  geom_label()+
-  guides(fill='none')+
-  scale_x_discrete(name = "Fuel")+
-  scale_y_continuous(name='Total Exposure (in years)', labels = label_number())
+gas_summary <- dataset %>%
+  group_by(Gas) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
+ggplot(
+  gas_summary,
+  aes(
+    x = Gas,
+    y = totalExposure,
+    fill = Gas,
+    label = number(totalExposure)
+  )
+) +
+  geom_bar(stat = "identity") +
+  geom_label() +
+  guides(fill = "none") +
+  scale_x_discrete(name = "Fuel") +
+  scale_y_continuous(
+    name = "Total Exposure (in years)",
+    labels = label_number()
+  )
 ```
 
 There seems to be a similar amount of Diesel and Regular gas vehicles in the portfolio.
 It is generally expected that Diesel have a higher claim frequency. Does this also hold on our dataset ?
 
 ```{r}
-ggplot(Gas.summary, 
-       aes(x=Gas, y=Obs.Claim.Freq, 
-           fill=Gas, 
-           label = percent(Obs.Claim.Freq))) + 
-  geom_bar(stat="identity") + 
-  geom_label()+  guides(fill='none')+
-  scale_x_discrete(name = "Fuel") + 
+ggplot(
+  gas_summary,
+  aes(
+    x = Gas, y = Obs.Claim.Freq,
+    fill = Gas,
+    label = percent(Obs.Claim.Freq, accuracy=0.01)
+  )
+) +
+  geom_bar(stat = "identity") +
+  geom_label() +
+  guides(fill = "none") +
+  scale_x_discrete(name = "Fuel") +
   scale_y_continuous("Observed claim Frequency", labels = label_percent())
 ```
 
@@ -528,11 +669,15 @@ levels(dataset$Region)
 What are the Exposures in each region ? What are the observed claim frequencies ?
 
 ```{r}
-Region.summary = dataset %>% group_by(Region) %>% summarize(totalExposure = sum(Exposure), 
-                                                           Number.Observations = length(Exposure), 
-                                                           Number.Claims = sum(ClaimNb), 
-                                                           Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
-Region.summary
+region_summary <- dataset %>%
+  group_by(Region) %>%
+  summarize(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
+region_summary
 ```
 
 #### Creating Maps
@@ -544,53 +689,86 @@ We first need to obtain the shape files (which contain the borders of each admin
 2. Extract all the files from the zip files, in a directory called shapefiles in your working directory
 
 ```{r}
-area <- rgdal::readOGR("shapefiles/FRA_adm1.shp", use_iconv = TRUE, encoding = "UTF-8") # From http://www.diva-gis.org/gData
+# From http://www.diva-gis.org/gData
+area <- sf::st_read(
+  "shapefiles/FRA_adm1.shp",
+  options = "ENCODING=UTF8"
+)
 
-# Note that the tidy function will remove the data.
-area_tidy = tidy(area) # package broom
-
-#Plot an "empty" map
-ggplot(area_tidy, aes(x = long, y = lat, group = group)) +
-  geom_polygon(color = "black", size = 0.1, fill = "lightgrey") +
-  coord_equal() + theme_void()
+leaflet(area) %>%
+  addPolygons(
+    color = "#444444", weight = 1,
+    opacity = 1.0, fillOpacity = 0.5,
+    highlightOptions = highlightOptions(
+      color = "white", weight = 2,
+      bringToFront = TRUE
+    )
+  ) %>%
+  addTiles()
 ```
 
 We are now going to include our data into the map
 
 ```{r}
-#First we re-include the data (that disappeared with the tidy function)
-area$id <- row.names(area)
-area_tidy2 <- area_tidy %>% full_join(area@data, by="id")
+area_w_data <- area %>% full_join(region_summary, by = c("NAME_1" = "Region"))
+```
 
-# Because of accents ...
-area_tidy2$NAME_1 = stri_trans_general(str = area_tidy2$NAME_1,
-                                       id = "Latin-ASCII")
+```{r}
+colors <- colorNumeric("YlOrRd", area_w_data$totalExposure)
+# Create leaflet map
+leaflet(area_w_data) %>%
+  addPolygons(
+    color = "#444444", weight = 1, smoothFactor = 0.5,
+    opacity = 1.0, fillOpacity = 0.5,
+    fillColor = ~ colors(totalExposure),
+    highlightOptions = highlightOptions(
+      color = "white", weight = 2,
+      bringToFront = TRUE,
+    ),
+    popup = ~ paste(
+      "Region: ", NAME_1, "<br>",
+      "Exposure: ", round(totalExposure, 1)
+    )
+  ) %>%
+  addTiles() %>%
+  leaflet::addLegend(
+    position = "bottomright",
+    pal = colors,
+    values = area_w_data$totalExposure,
+    title = "Total Exposure",
+    labFormat = labelFormat(suffix = ""),
+    opacity = 1
+  )
+```
 
-# Which computed data do we want ?
-data_to_add = Region.summary[,c("Region", "totalExposure", "Obs.Claim.Freq")]
-# Merge it 
-area_tidy2 <- area_tidy2 %>% full_join(data_to_add, by = c("NAME_1" = "Region"))
+Finally, plot the claim frequencies
 
-# Very important: Do not forget to sort by "order" variable.
-# area_tidy2 = area_tidy2[order(area_tidy2$order),]
-# Easier with dplyr:
-area_tidy2 = area_tidy2 %>% arrange(order)
-
-# Finally, plot the data: the claim frequencies
-p1 = ggplot(area_tidy2, aes(long, lat, group=group, fill = Obs.Claim.Freq)) + ggtitle("Observed Claim Frequencies")+
-  geom_polygon(color="black")+
-  scale_fill_gradient(low = "green", high = "red", name="Obs. Claim Freq.")+
-xlab("Longitude") + ylab("Latitude") + theme_void()
-
-# and the exposures (on a log-scale)...
-p2 = ggplot(area_tidy2, aes(long, lat, group=group, fill = log(totalExposure))) + ggtitle("log Exposures in years")+
-  geom_polygon(color="black")+
-  scale_fill_gradient(low = "green", high = "red", name="log Exposure")+
-xlab("Longitude") + ylab("Latitude") + theme_void()
-
-
-# Show them next to each other: Very easy using patchwork package
-p1 + p2
+```{r}
+colors <- colorNumeric("YlOrRd", area_w_data$Obs.Claim.Freq)
+# Create leaflet map
+leaflet(area_w_data) %>%
+  addPolygons(
+    color = "#444444", weight = 1, smoothFactor = 0.5,
+    opacity = 1.0, fillOpacity = 0.5,
+    fillColor = ~ colors(Obs.Claim.Freq),
+    highlightOptions = highlightOptions(
+      color = "white", weight = 2,
+      bringToFront = TRUE,
+    ),
+    popup = ~ paste(
+      "Region: ", NAME_1, "<br>",
+      "Exposure: ", percent(Obs.Claim.Freq, accuracy=0.01)
+    )
+  ) %>%
+  addTiles() %>%
+  leaflet::addLegend(
+    position = "bottomright",
+    pal = colors,
+    values = area_w_data$Obs.Claim.Freq,
+    title = "Obs. Claim Frequency",
+    labFormat = labelFormat(suffix = ""),
+    opacity = 1
+  )
 ```
 
 ### Density
@@ -599,7 +777,8 @@ Let us take a look at the densities in the dataset.
 
 ```{r}
 summary(dataset$Density)
-ggplot(dataset, aes(Density)) + geom_histogram(bins=200)
+ggplot(dataset, aes(Density)) +
+  geom_histogram(bins = 200)
 ```
 
 Here, contrary to the age of the driver, or the age of the car, the density has lots of different values, as we can see below.
@@ -611,12 +790,15 @@ length(unique(dataset$Density))
 Let us still compute as before the summary statistics and plot them ...
 
 ```{r}
-Density.summary = dataset %>% group_by(Density) %>%
-                   summarise(totalExposure = sum(Exposure), 
-                                Number.Observations = length(Exposure), 
-                                Number.Claims = sum(ClaimNb), 
-                                Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
-ggplot(Density.summary, aes(x=Density, y=Obs.Claim.Freq)) + 
+density_summary <- dataset %>%
+  group_by(Density) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
+ggplot(density_summary, aes(x = Density, y = Obs.Claim.Freq)) +
   geom_point()
 ```
 
@@ -625,8 +807,10 @@ ggplot(Density.summary, aes(x=Density, y=Obs.Claim.Freq)) +
 We can categorize the variable using the function *cut*.
 
 ```{r}
-dataset$DensityCAT = cut(dataset$Density, breaks = quantile(dataset$Density, probs = seq(from = 0, to = 1, by=0.1)),
-                         include.lowest = TRUE)
+dataset$DensityCAT <- cut(dataset$Density,
+  breaks = quantile(dataset$Density, probs = seq(from = 0, to = 1, by = 0.1)),
+  include.lowest = TRUE
+)
 levels(dataset$DensityCAT) <- LETTERS[1:10]
 table(dataset$DensityCAT)
 ```
@@ -634,21 +818,33 @@ table(dataset$DensityCAT)
 Then, we can apply the same strategy as above.
 
 ```{r}
-Density.summary = dataset %>% group_by(DensityCAT) %>%
-                  summarise(totalExposure = sum(Exposure), 
-                            Number.Observations = length(Exposure), 
-                            Number.Claims = sum(ClaimNb), 
-                            Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
+density_summary <- dataset %>%
+  group_by(DensityCAT) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
 
-ggplot(Density.summary, 
-       aes(x=DensityCAT, 
-           y=Obs.Claim.Freq, 
-           fill=DensityCAT, 
-           label = label_percent()(Obs.Claim.Freq))) + 
-  geom_bar(stat="identity") + 
-  geom_label()+  guides(fill='none')+
-  scale_x_discrete(name = "Density") + 
-  scale_y_continuous("Observed claim Frequency", labels = label_percent(), expand = expansion(mult = c(0, 0.15)))
+ggplot(
+  density_summary,
+  aes(
+    x = DensityCAT,
+    y = Obs.Claim.Freq,
+    fill = DensityCAT,
+    label = label_percent()(Obs.Claim.Freq)
+  )
+) +
+  geom_bar(stat = "identity") +
+  geom_label() +
+  guides(fill = "none") +
+  scale_x_discrete(name = "Density") +
+  scale_y_continuous(
+    "Observed claim Frequency",
+    labels = label_percent(),
+    expand = expansion(mult = c(0, 0.15))
+  )
 ```
 
 ## Interactions
@@ -658,19 +854,27 @@ We can of course also dive into some interactions. For instance, we could analys
 ### Fuel and Car Age
 
 ```{r}
-CarAge.Fuel.summary = dataset %>% group_by(CarAge, Gas) %>% 
-                      summarise(totalExposure = sum(Exposure),
-                                Number.Observations = length(Exposure),
-                                Number.Claims = sum(ClaimNb),
-                                Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
+carage_fuel_summary <- dataset %>%
+  group_by(CarAge, Gas) %>%
+  summarise(
+    totalExposure = sum(Exposure),
+    Number.Observations = length(Exposure),
+    Number.Claims = sum(ClaimNb),
+    Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure)
+  )
 
-ggplot(CarAge.Fuel.summary, aes(x=CarAge, 
-                                y=Obs.Claim.Freq)) + 
-  facet_wrap(~Gas)+
-  geom_bar(stat="identity") + 
-  scale_x_continuous(name = "Age of the Car", breaks=seq(0,100,5))+
-  scale_y_continuous(name = "Observed Claim Frequency", labels = percent_format(accuracy = 0.01))+
-  theme(legend.position = 'none')
+ggplot(carage_fuel_summary, aes(
+  x = CarAge,
+  y = Obs.Claim.Freq
+)) +
+  facet_wrap(~Gas) +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(name = "Age of the Car", breaks = seq(0, 100, 5)) +
+  scale_y_continuous(
+    name = "Observed Claim Frequency",
+    labels = percent_format(accuracy = 0.01)
+  ) +
+  theme(legend.position = "none")
 
 # Warning Message -  Explanation here: https://stackoverflow.com/a/69392954
 ```
@@ -680,20 +884,26 @@ ggplot(CarAge.Fuel.summary, aes(x=CarAge,
 We will illustrate another way to show this kind of data, by overlapping both bars.
 
 ```{r}
-DriverAge.Fuel.summary = dataset %>% group_by(DriverAge, Gas) %>% 
-                        summarize(Obs.Claim.Freq = sum(ClaimNb)/sum(Exposure))
+driverage_fuel_summary <- dataset %>%
+  group_by(DriverAge, Gas) %>%
+  summarize(Obs.Claim.Freq = sum(ClaimNb) / sum(Exposure))
 
-ggplot(data=DriverAge.Fuel.summary, aes(x=DriverAge, 
-                                        y=Obs.Claim.Freq, 
-                                        fill=Gas, 
-                                        color=Gas, 
-                                        alpha=Gas)) +
-  geom_bar(stat="identity", position ="identity") +
-  scale_x_continuous(name = "Age of the Driver", breaks = seq(0,100,5))+
-  scale_y_continuous(name = "Observed Claim Frequency", labels = label_percent())+
-  scale_colour_manual(values=c("lightblue4", "red")) +
-  scale_fill_manual(values=c("lightblue", "pink")) +
-  scale_alpha_manual(values=c(.3, .8))+
+ggplot(data = driverage_fuel_summary, aes(
+  x = DriverAge,
+  y = Obs.Claim.Freq,
+  fill = Gas,
+  color = Gas,
+  alpha = Gas
+)) +
+  geom_bar(stat = "identity", position = "identity") +
+  scale_x_continuous(name = "Age of the Driver", breaks = seq(0, 100, 5)) +
+  scale_y_continuous(
+    name = "Observed Claim Frequency",
+    labels = label_percent()
+  ) +
+  scale_colour_manual(values = c("lightblue4", "red")) +
+  scale_fill_manual(values = c("lightblue", "pink")) +
+  scale_alpha_manual(values = c(.3, .8)) +
   theme_bw()
 ```
 
