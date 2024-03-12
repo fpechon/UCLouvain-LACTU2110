@@ -48,7 +48,7 @@ options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
     package 'multilevelmod' successfully unpacked and MD5 sums checked
     
     The downloaded binary packages are in
-    	C:\Users\Florian\AppData\Local\Temp\Rtmp4GxSpH\downloaded_packages
+    	C:\Users\Florian\AppData\Local\Temp\RtmpQh1clH\downloaded_packages
     
 
     Le chargement a nécessité le package : caret
@@ -206,7 +206,7 @@ ptn_1
 ```
 
 
-    Time difference of 6.335381 mins
+    Time difference of 6.412889 mins
 
 
 
@@ -523,7 +523,7 @@ ptn_1
 ```
 
 
-    Time difference of 4.243747 mins
+    Time difference of 3.835233 mins
 
 
 
@@ -556,7 +556,7 @@ ptn_1
 ```
 
 
-    Time difference of 6.538676 mins
+    Time difference of 6.278916 mins
 
 
 
@@ -618,42 +618,70 @@ Let us construct the factors a bit differently. We will only use the variables D
 
 
 ```R
+driver_age_lst = c()
 for (age in (18:99)){
     training_set[paste0("DriverAge_", age)] = 1*(training_set$DriverAge <= age)
     testing_set[paste0("DriverAge_", age)] = 1*(testing_set$DriverAge <= age)
+    driver_age_lst = c(driver_age_lst, paste0("DriverAge_", age))
 }
 
+car_age_lst = c()
 for (vehage in (0:25)){
     training_set[paste0("CarAge_", vehage)] = 1*(training_set$CarAge <= vehage)
     testing_set[paste0("CarAge_", vehage)] = 1*(testing_set$CarAge <= vehage)
+    car_age_lst = c(car_age_lst, paste0("CarAge_", vehage))
 }
 
+density_lst = c()
+for (density in unique(quantile(training_set$Density, seq(0.01,0.99,0.01)))){
+    training_set[paste0("Density_", density)] = 1*(training_set$Density <= density)
+    testing_set[paste0("Density_", density)] = 1*(testing_set$Density <= density)
+    density_lst = c(density_lst, paste0("Density_", density))
+}
+
+power_lst = c()
+levels = levels(ordered(training_set$Power))
+for (power in 1:length(unique(ordered(training_set$Power)))){
+    training_set[paste0("Power_", power)] = 1*(ordered(training_set$Power) <= levels[power])
+    testing_set[paste0("Power_", power)] = 1*(ordered(testing_set$Power) <= levels[power])
+    power_lst = c(power_lst, paste0("Power_", power))
+}
+
+lst_vars = paste(paste(driver_age_lst, collapse=" + "), 
+                 paste(car_age_lst, collapse=" + "), 
+                 paste(density_lst, collapse=" + "), 
+                 paste(power_lst, collapse=" + "), 
+                 sep = " + ")
 ```
 
 
 ```R
 ptn=Sys.time()
-model_exp_x = model.matrix(ClaimNb ~ 0 + DriverAge_18 + DriverAge_19 + DriverAge_20 + DriverAge_21 + DriverAge_22 + 
-                 DriverAge_23 + DriverAge_24 + DriverAge_25 + DriverAge_26 + DriverAge_27 + DriverAge_28 + 
-                 DriverAge_29 + DriverAge_30 + DriverAge_31 + DriverAge_32 + DriverAge_33 + DriverAge_34 + 
-                 DriverAge_35 + DriverAge_36 + DriverAge_37 + DriverAge_38 + DriverAge_39 + DriverAge_40 + 
-                 DriverAge_41 + DriverAge_42 + DriverAge_43 + DriverAge_44 + DriverAge_45 + DriverAge_46 + 
-                 DriverAge_47 + DriverAge_48 + DriverAge_49 + DriverAge_50 + DriverAge_51 + DriverAge_52 + 
-                 DriverAge_53 + DriverAge_54 + DriverAge_55 + DriverAge_56 + DriverAge_57 + DriverAge_58 + 
-                 DriverAge_59 + DriverAge_60 + DriverAge_61 + DriverAge_62 + DriverAge_63 + DriverAge_64 + 
-                 DriverAge_65 + DriverAge_66 + DriverAge_67 + DriverAge_68 + DriverAge_69 + DriverAge_70 + 
-                 DriverAge_71 + DriverAge_72 + DriverAge_73 + DriverAge_74 + DriverAge_75 + DriverAge_76 + 
-                 DriverAge_77 + DriverAge_78 + DriverAge_79 + DriverAge_80 + DriverAge_81 + DriverAge_82 + 
-                 DriverAge_83 + DriverAge_84 + DriverAge_85 + DriverAge_86 + DriverAge_87 + DriverAge_88 + 
-                 DriverAge_89 + DriverAge_90 + DriverAge_91 + DriverAge_92 + DriverAge_93 + DriverAge_94 + 
-                 DriverAge_95 + DriverAge_96 + DriverAge_97 + DriverAge_98 + DriverAge_99 + 
-                 CarAge_0 + CarAge_1 + CarAge_2 + CarAge_3 + CarAge_4 + CarAge_5 + CarAge_6 + 
-                 CarAge_7 + CarAge_8 + CarAge_9 + CarAge_10 + CarAge_11 + CarAge_12 + 
-                 CarAge_13 + CarAge_14 + CarAge_15 + CarAge_16 + CarAge_17 + CarAge_18 + 
-                 CarAge_19 + CarAge_20 + CarAge_21 + CarAge_22 + CarAge_23 + CarAge_24 + CarAge_25,
-                 data=training_set)
+model_exp_x = model.matrix(as.formula(paste("ClaimNb ~ 0  + ", 
+                                            lst_vars, 
+                                            sep="")),
+                           data=training_set)
 
+head(model_exp_x)
 ```
+
+
+<table class="dataframe">
+<caption>A matrix: 6 × 217 of type dbl</caption>
+<thead>
+	<tr><th></th><th scope=col>DriverAge_18</th><th scope=col>DriverAge_19</th><th scope=col>DriverAge_20</th><th scope=col>DriverAge_21</th><th scope=col>DriverAge_22</th><th scope=col>DriverAge_23</th><th scope=col>DriverAge_24</th><th scope=col>DriverAge_25</th><th scope=col>DriverAge_26</th><th scope=col>DriverAge_27</th><th scope=col>...</th><th scope=col>Power_3</th><th scope=col>Power_4</th><th scope=col>Power_5</th><th scope=col>Power_6</th><th scope=col>Power_7</th><th scope=col>Power_8</th><th scope=col>Power_9</th><th scope=col>Power_10</th><th scope=col>Power_11</th><th scope=col>Power_12</th></tr>
+</thead>
+<tbody>
+	<tr><th scope=row>2</th><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>...</td><td>0</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+	<tr><th scope=row>3</th><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>...</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+	<tr><th scope=row>4</th><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>...</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+	<tr><th scope=row>5</th><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>...</td><td>0</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+	<tr><th scope=row>6</th><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>...</td><td>0</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+	<tr><th scope=row>7</th><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>1</td><td>...</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td><td>1</td></tr>
+</tbody>
+</table>
+
+
 
 
 ```R
@@ -676,7 +704,7 @@ ptn_1
 ```
 
 
-    Time difference of 1.80776 mins
+    Time difference of 7.383376 mins
 
 
 
@@ -691,8 +719,8 @@ m.lasso.1.cv
     Measure: Poisson Deviance 
     
           Lambda Index Measure       SE Nonzero
-    min 0.000379     9  0.2538 0.001867      29
-    1se 0.005559     2  0.2553 0.001888       5
+    min 0.000379     9  0.2523 0.001820      49
+    1se 0.003787     3  0.2538 0.001851      10
 
 
 
@@ -701,122 +729,234 @@ coef(m.lasso.1.cv, s = "lambda.min")
 ```
 
 
-    109 x 1 sparse Matrix of class "dgCMatrix"
-                            s1
-    (Intercept)  -3.1281701957
-    DriverAge_18  0.1057046756
-    DriverAge_19  0.2334929393
-    DriverAge_20  0.3401326182
-    DriverAge_21  0.0020254687
-    DriverAge_22  0.1904254512
-    DriverAge_23  0.1091952209
-    DriverAge_24  0.1222833992
-    DriverAge_25  .           
-    DriverAge_26  0.2335448741
-    DriverAge_27  .           
-    DriverAge_28  0.0158713088
-    DriverAge_29  0.0897545434
-    DriverAge_30  .           
-    DriverAge_31  0.0340601774
-    DriverAge_32  .           
-    DriverAge_33  .           
-    DriverAge_34  .           
-    DriverAge_35  .           
-    DriverAge_36  .           
-    DriverAge_37  .           
-    DriverAge_38  .           
-    DriverAge_39  .           
-    DriverAge_40  .           
-    DriverAge_41 -0.0187640582
-    DriverAge_42 -0.0356267177
-    DriverAge_43 -0.0006757569
-    DriverAge_44  .           
-    DriverAge_45  .           
-    DriverAge_46  .           
-    DriverAge_47  .           
-    DriverAge_48  .           
-    DriverAge_49  .           
-    DriverAge_50  .           
-    DriverAge_51  0.0152449699
-    DriverAge_52  .           
-    DriverAge_53  0.0473036621
-    DriverAge_54  0.0854077776
-    DriverAge_55  .           
-    DriverAge_56  .           
-    DriverAge_57  .           
-    DriverAge_58  .           
-    DriverAge_59  .           
-    DriverAge_60  .           
-    DriverAge_61  .           
-    DriverAge_62  0.0459254860
-    DriverAge_63  0.0213810652
-    DriverAge_64  .           
-    DriverAge_65  .           
-    DriverAge_66  .           
-    DriverAge_67  .           
-    DriverAge_68  .           
-    DriverAge_69  .           
-    DriverAge_70  .           
-    DriverAge_71  .           
-    DriverAge_72  .           
-    DriverAge_73  .           
-    DriverAge_74 -0.0079226705
-    DriverAge_75  .           
-    DriverAge_76  .           
-    DriverAge_77  .           
-    DriverAge_78  .           
-    DriverAge_79  .           
-    DriverAge_80  .           
-    DriverAge_81  .           
-    DriverAge_82  .           
-    DriverAge_83  .           
-    DriverAge_84  .           
-    DriverAge_85 -0.0193009723
-    DriverAge_86  .           
-    DriverAge_87  .           
-    DriverAge_88 -0.0875766416
-    DriverAge_89  .           
-    DriverAge_90  .           
-    DriverAge_91  0.0658694661
-    DriverAge_92  .           
-    DriverAge_93  .           
-    DriverAge_94  .           
-    DriverAge_95  .           
-    DriverAge_96  .           
-    DriverAge_97  .           
-    DriverAge_98  .           
-    DriverAge_99  .           
-    CarAge_0      .           
-    CarAge_1      .           
-    CarAge_2      .           
-    CarAge_3      .           
-    CarAge_4      .           
-    CarAge_5      .           
-    CarAge_6      .           
-    CarAge_7      .           
-    CarAge_8      .           
-    CarAge_9      .           
-    CarAge_10     0.0171396393
-    CarAge_11     0.0026479357
-    CarAge_12     0.1348012753
-    CarAge_13     .           
-    CarAge_14     0.0531308774
-    CarAge_15     .           
-    CarAge_16     .           
-    CarAge_17     0.1456152254
-    CarAge_18     .           
-    CarAge_19     .           
-    CarAge_20     0.0065982939
-    CarAge_21     .           
-    CarAge_22     .           
-    CarAge_23     .           
-    CarAge_24     .           
-    CarAge_25     .           
+    218 x 1 sparse Matrix of class "dgCMatrix"
+                             s1
+    (Intercept)   -2.6881967110
+    DriverAge_18   0.1230383584
+    DriverAge_19   0.2425459500
+    DriverAge_20   0.3468576743
+    DriverAge_21   0.0081852836
+    DriverAge_22   0.1919444916
+    DriverAge_23   0.1115035954
+    DriverAge_24   0.1334220842
+    DriverAge_25   .           
+    DriverAge_26   0.2385793758
+    DriverAge_27   .           
+    DriverAge_28   0.0063266606
+    DriverAge_29   0.0884926007
+    DriverAge_30   .           
+    DriverAge_31   0.0330756231
+    DriverAge_32   .           
+    DriverAge_33   .           
+    DriverAge_34   .           
+    DriverAge_35   .           
+    DriverAge_36   .           
+    DriverAge_37   .           
+    DriverAge_38   .           
+    DriverAge_39   .           
+    DriverAge_40   .           
+    DriverAge_41  -0.0139173282
+    DriverAge_42  -0.0452490010
+    DriverAge_43  -0.0048463049
+    DriverAge_44   .           
+    DriverAge_45   .           
+    DriverAge_46   .           
+    DriverAge_47   .           
+    DriverAge_48   .           
+    DriverAge_49   .           
+    DriverAge_50   .           
+    DriverAge_51   0.0142488466
+    DriverAge_52   .           
+    DriverAge_53   0.0473966312
+    DriverAge_54   0.0867331457
+    DriverAge_55   .           
+    DriverAge_56   .           
+    DriverAge_57   .           
+    DriverAge_58   .           
+    DriverAge_59   .           
+    DriverAge_60   .           
+    DriverAge_61   .           
+    DriverAge_62   0.0212773459
+    DriverAge_63   0.0152644944
+    DriverAge_64   .           
+    DriverAge_65   .           
+    DriverAge_66   .           
+    DriverAge_67   .           
+    DriverAge_68   .           
+    DriverAge_69   .           
+    DriverAge_70   .           
+    DriverAge_71   .           
+    DriverAge_72   .           
+    DriverAge_73   .           
+    DriverAge_74  -0.0203627755
+    DriverAge_75   .           
+    DriverAge_76   .           
+    DriverAge_77   .           
+    DriverAge_78   .           
+    DriverAge_79   .           
+    DriverAge_80   .           
+    DriverAge_81   .           
+    DriverAge_82  -0.0028710836
+    DriverAge_83   .           
+    DriverAge_84   .           
+    DriverAge_85  -0.0453411877
+    DriverAge_86   .           
+    DriverAge_87   .           
+    DriverAge_88  -0.1156017796
+    DriverAge_89   .           
+    DriverAge_90   .           
+    DriverAge_91   0.1600934560
+    DriverAge_92   .           
+    DriverAge_93   .           
+    DriverAge_94   .           
+    DriverAge_95   .           
+    DriverAge_96   .           
+    DriverAge_97   .           
+    DriverAge_98   .           
+    DriverAge_99   .           
+    CarAge_0       .           
+    CarAge_1       .           
+    CarAge_2       .           
+    CarAge_3      -0.0412367870
+    CarAge_4       .           
+    CarAge_5       .           
+    CarAge_6       .           
+    CarAge_7       .           
+    CarAge_8       .           
+    CarAge_9       .           
+    CarAge_10      .           
+    CarAge_11      .           
+    CarAge_12      0.1249058005
+    CarAge_13      .           
+    CarAge_14      0.0553587798
+    CarAge_15      .           
+    CarAge_16      .           
+    CarAge_17      0.1305474560
+    CarAge_18      .           
+    CarAge_19      .           
+    CarAge_20      .           
+    CarAge_21      0.0034407096
+    CarAge_22      .           
+    CarAge_23      .           
+    CarAge_24      .           
+    CarAge_25      .           
+    Density_10     0.0250248791
+    Density_11     .           
+    Density_13     .           
+    Density_15     .           
+    Density_17     .           
+    Density_19    -0.1046584112
+    Density_22     .           
+    Density_24     .           
+    Density_26     .           
+    Density_28     .           
+    Density_30     .           
+    Density_32     .           
+    Density_34     .           
+    Density_37     .           
+    Density_40    -0.0691068227
+    Density_43     .           
+    Density_44     .           
+    Density_48     .           
+    Density_50     .           
+    Density_51     .           
+    Density_55     .           
+    Density_57    -0.0355121844
+    Density_60    -0.0015025919
+    Density_64     .           
+    Density_67     .           
+    Density_73     .           
+    Density_79     .           
+    Density_83     .           
+    Density_88     .           
+    Density_91     .           
+    Density_95     .           
+    Density_102    .           
+    Density_105    .           
+    Density_110   -0.0202492526
+    Density_117    .           
+    Density_125    .           
+    Density_133    .           
+    Density_142    .           
+    Density_149    .           
+    Density_159    .           
+    Density_169    .           
+    Density_182    .           
+    Density_192    .           
+    Density_204   -0.0527680685
+    Density_218    .           
+    Density_229    .           
+    Density_243    .           
+    Density_264    .           
+    Density_282    .           
+    Density_288    .           
+    Density_298    .           
+    Density_329    .           
+    Density_359    .           
+    Density_394   -0.0714800408
+    Density_405   -0.0320320494
+    Density_408    .           
+    Density_451    .           
+    Density_473    .           
+    Density_503    .           
+    Density_557    .           
+    Density_612    .           
+    Density_644    .           
+    Density_713    .           
+    Density_741   -0.0078728044
+    Density_796   -0.0944469716
+    Density_851   -0.0152366937
+    Density_957    .           
+    Density_1052  -0.0013819343
+    Density_1055   .           
+    Density_1165   .           
+    Density_1284   .           
+    Density_1313   .           
+    Density_1329   .           
+    Density_1410   .           
+    Density_1500   .           
+    Density_1765   .           
+    Density_1943  -0.0730819011
+    Density_2103   .           
+    Density_2411   .           
+    Density_2663   .           
+    Density_2906   .           
+    Density_3060   .           
+    Density_3368   .           
+    Density_3541   .           
+    Density_3866   .           
+    Density_4087   .           
+    Density_4116   .           
+    Density_4128   .           
+    Density_4348   .           
+    Density_4496   .           
+    Density_5376   .           
+    Density_6257   .           
+    Density_6864   .           
+    Density_8023  -0.0009601506
+    Density_10477  .           
+    Density_17140 -0.0458907286
+    Density_27000  .           
+    Power_1       -0.1273518546
+    Power_2        .           
+    Power_3        .           
+    Power_4       -0.0463346564
+    Power_5       -0.0241069746
+    Power_6       -0.0130266934
+    Power_7        .           
+    Power_8        .           
+    Power_9        .           
+    Power_10       .           
+    Power_11       .           
+    Power_12       .           
 
 
 
 ```R
-plotdata = expand.grid(DriverAge = 18:99, CarAge = 0:25, Exposure = 1)
+plotdata = expand.grid(DriverAge = 18:99, 
+                       CarAge = 0:25, 
+                       Density = unique(quantile(training_set$Density, seq(0.01,0.99,0.01))),
+                       Exposure = 1)
 
 
 for (age in (18:99)){
@@ -825,9 +965,12 @@ for (age in (18:99)){
 for (vehage in (0:25)){
     plotdata[paste0("CarAge_", vehage)] = 1*(plotdata$CarAge <= vehage)
 }
+for (density in unique(sort(plotdata$Density))){
+    plotdata[paste0("Density_", density)] = 1*(plotdata$Density <= density)
+}
 
 plotdata['prediction'] = predict(m.lasso.1.cv, 
-                                 as.matrix(subset(plotdata, select = -c(DriverAge, CarAge, Exposure))),
+                                 as.matrix(subset(plotdata, select = -c(DriverAge, CarAge,Density, Exposure))),
                                  newoffset = 0, 
                                  type="response", 
                                  s = m.lasso.1.cv$lambda.min)
@@ -835,26 +978,96 @@ plotdata['prediction'] = predict(m.lasso.1.cv,
 ```
 
 
+    Error in predict.glmnet(object$glmnet.fit, newx, s = lambda, ...): The number of variables in newx must be 217
+    Traceback:
+    
+
+    1. predict(m.lasso.1.cv, as.matrix(subset(plotdata, select = -c(DriverAge, 
+     .     CarAge, Density, Exposure))), newoffset = 0, type = "response", 
+     .     s = m.lasso.1.cv$lambda.min)
+
+    2. predict.cv.glmnet(m.lasso.1.cv, as.matrix(subset(plotdata, select = -c(DriverAge, 
+     .     CarAge, Density, Exposure))), newoffset = 0, type = "response", 
+     .     s = m.lasso.1.cv$lambda.min)
+
+    3. predict(object$glmnet.fit, newx, s = lambda, ...)
+
+    4. predict.fishnet(object$glmnet.fit, newx, s = lambda, ...)
+
+    5. NextMethod("predict")
+
+    6. predict.glmnet(object$glmnet.fit, newx, s = lambda, ...)
+
+    7. stop(paste0("The number of variables in newx must be ", p))
+
+
+
 ```R
 require(ggplot2)
 ggplot(plotdata %>% group_by(DriverAge) %>% summarise(prediction = mean(prediction)), 
-       aes(x=DriverAge, y=prediction)) + geom_point() + geom_line() + theme_bw()
+       aes(x=DriverAge, y=prediction)) + geom_point() + geom_line() + theme_bw() + 
+        scale_y_continuous(labels = scales::label_percent(accuracy = 0.02))
 ```
-
-
-    
-![png](Elastic%20Net_files/Elastic%20Net_23_0.png)
-    
-
 
 
 ```R
 ggplot(plotdata %>% group_by(CarAge) %>% summarise(prediction = mean(prediction)), 
-       aes(x=CarAge, y=prediction)) + geom_point() + geom_line() + theme_bw()
+       aes(x=CarAge, y=prediction)) + geom_point() + geom_line() + theme_bw()+
+scale_y_continuous(labels = scales::label_percent(accuracy = 0.02))
 ```
 
 
-    
-![png](Elastic%20Net_files/Elastic%20Net_24_0.png)
-    
+```R
+ggplot(plotdata %>% group_by(Density) %>% summarise(prediction = mean(prediction)), 
+       aes(x=Density, y=prediction)) + geom_point() + geom_line() + theme_bw()+
+scale_y_continuous(labels = scales::label_percent(accuracy = 0.02))
+```
 
+
+```R
+s = coef(m.lasso.1.cv, s = "lambda.min")
+driver_age_breaks = c()
+car_age_breaks = c()
+density_breaks = c()
+for (col in names(which(s[,1] != 0))){
+    if (grepl("DriverAge_", col)){
+         driver_age_breaks = c(driver_age_breaks, as.numeric(unlist(strsplit(col, "_"))[2]))
+    }
+    if (grepl("CarAge_", col)){
+         car_age_breaks = c(car_age_breaks, as.numeric(unlist(strsplit(col, "_"))[2]))
+    }
+    if (grepl("Density_", col)){
+         density_breaks = c(density_breaks, as.numeric(unlist(strsplit(col, "_"))[2]))
+    }
+}
+
+# Define a data preprocessing with these breaks
+
+data_prep = recipe(ClaimNb ~ DriverAge + CarAge + Power + Gas + Region + Brand + Density + Exposure, data = training_set) %>%
+    step_relevel(Power, ref_level = "d") %>%
+    step_relevel(Gas, ref_level = "Regular") %>%
+    step_relevel(Region, ref_level = "Centre") %>%
+    step_relevel(Brand, ref_level = "Renault, Nissan or Citroen") %>%
+    step_mutate(DriverAge = cut(DriverAge, breaks = c(-Inf, driver_age_breaks, Inf))) %>%
+    step_mutate(CarAge = cut(CarAge, breaks = c(-Inf, car_age_breaks, Inf))) %>%
+    step_mutate(Density = cut(Density, breaks = c(-Inf, density_breaks, Inf))) %>%
+    step_mutate(Power = forcats::fct_collapse(Power, 
+                                                 "d-e-f" = c("d", "e", "f"),
+                                                 "j-k-l-m-n-o" = c("j", "k", "l", "m", "n", "o")
+                                                )) %>%
+    prep()
+```
+
+
+```R
+m_glm = glm(ClaimNb ~ offset(log(Exposure)) + Power + Brand + Gas + Region + DriverAge + CarAge + Density, 
+   data = data_prep %>% bake(training_set),
+   family=poisson(link=log))
+summary(m_glm)
+```
+
+
+```R
+2 * (sum(dpois(x = testing_set$ClaimNb, lambda = testing_set$ClaimNb,
+    log = TRUE)) - sum(dpois(x = testing_set$ClaimNb, lambda = predict(m_glm, data_prep %>% bake(testing_set), type="response"), log=TRUE)))
+```
