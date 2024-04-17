@@ -15,6 +15,7 @@ if (!require("arrow")) install.packages("arrow")
 if (!require("caret")) install.packages("caret")
 if (!require("ggplot2")) install.packages("ggplot2")
 if (!require("rattle")) install.packages("rattle")
+if (!require("dplyr")) install.packages("dplyr")
 
 
 require("rpart")
@@ -23,6 +24,7 @@ require("arrow")
 require("caret")
 require("ggplot2")
 require("rattle")
+require("dplyr")
 
 options(repr.plot.width = 8, repr.plot.height = 6, repr.plot.res = 150);
 ```
@@ -87,6 +89,38 @@ m0_rpart = rpart(cbind(Exposure, ClaimNb) ~ DriverAge + CarAge,
 summary(m0_rpart)
 ```
 
+### Understanding Optimal Split
+Let us try to understand why the first split uses the following split DriverAge < 26.5.
+
+Let us consider the different possible ways to split the dataset into two using the DriverAge variable.
+
+```{r}
+ages = seq(18.5,98.5,1)
+
+loglik =sapply(ages,function(age){
+    # Define an indicator to split the data
+    training_set$DriverAge_indicator = (training_set$DriverAge < age)
+    # Compute on both sides of the split the claim frequency
+    temp = training_set %>% group_by(DriverAge_indicator) %>% summarise(claim_freq=sum(ClaimNb)/sum(Exposure))
+    # Assign the claim frequency to each row of the dataset
+    training_set = training_set %>% left_join(temp, by="DriverAge_indicator")
+    # Compute the log-likelihood.
+    return(with(training_set, sum(dpois(x=ClaimNb, lambda = Exposure * claim_freq, log=TRUE))))
+})
+
+plotdata = data.frame(DriverAge=ages, loglik=loglik)
+ggplot(plotdata) + geom_line(aes(x=DriverAge, y=loglik))
+```
+
+```{r}
+# Show 5 splits with greatest log-likelihood
+head(plotdata[order(-plotdata$loglik),], 5)
+```
+
+We see that DriverAge < 26.5 indeed corresponds to the optimal split.
+
+### Plot a tree
+
 The easiest way to interpret a CART is probably to plot it (if it is not too large, though!). This can be achieved with the function *rpart.plot* from the package *rpart.plot*.
 
 ```{r}
@@ -105,7 +139,7 @@ fancyRpartPlot(m0_rpart, split.col="black",nn.col="black",
                caption="", digits=2)
 ```
 
-If the tree is too large, we will probably have some overfitting. To prevent overfitting, we can play with the complexity parameter cp. A good approach is to compute the whole tree, without any penalty (i.e. complexity parameter is set to 0) and afterwards prune to tree.
+If the tree is too large, we will probably have some overfitting. To prevent overfitting, we can play with the complexity parameter cp. A good approach is to compute the whole tree, without any penalty (i.e. complexity parameter is set to 0) and afterwards prune the tree to a subtree.
 
 ```{r}
 m0_rpart = rpart(cbind(Exposure, ClaimNb) ~ DriverAge + CarAge, 
@@ -177,7 +211,7 @@ Let us now find the optimal tree, by using cross-validation. We will again only 
 
 Essentially (and with some shortcuts), we can summarize the method as follows:
 
-1. Estimate the full tree (cp = 0), on the whole data. We obtain a list of complexity parameters $\alpha_i$. We compute the $\beta$s are the geometric mean of two successive $\alpha_i$s. To each $\beta_i$ corresponds a subtree of the full tree.
+1. Estimate the full tree (cp = 0), on the whole data. We obtain a list of complexity parameters $\alpha_i$. We define $\beta$s as the geometric mean of two successive $\alpha_i$s. To each $\beta_i$ corresponds a subtree of the full tree.
 2. Split the whole data into *folds* (generally 10 folds).
     - Estimate the tree using all folds but one. 
     - Using the list of $\beta_i$s from the previous step, we prune the tree to differents subtrees.
@@ -257,19 +291,18 @@ SE = m1_rpart$cptable[which.min(m1_rpart$cptable[, 4]), 5]
 min_error = m1_rpart$cptable[which.min(m1_rpart$cptable[, 4]), 4]
 boundary = min_error + SE
 
-# Plot cross-validation error and 1SE_rule boundary.
-ggplot() + geom_line(aes(x = m1_rpart$cptable[, 1], y = m1_rpart$cptable[, 4]))+
-geom_point(aes(x = m1_rpart$cptable[, 1], y = m1_rpart$cptable[, 4]))+
+# Plot cross-validation error and 1SE_rule boundary (as a function of log(cp))
+ggplot() + geom_line(aes(x = log(m1_rpart$cptable[, 1]), y = m1_rpart$cptable[, 4]))+
+geom_point(aes(x = log(m1_rpart$cptable[, 1]), y = m1_rpart$cptable[, 4]))+
 geom_hline(aes(yintercept = boundary), color="red")+
-scale_x_continuous(name = "CP") + scale_y_continuous(name = "xerror") + theme_bw()
+scale_x_continuous(name = "log(CP)") + scale_y_continuous(name = "xerror") + theme_bw()
 ```
 
 If we take the value of cp that minimizes the error, we find
 
 ```{r}
-# A verifier
 cp_star = m1_rpart$cptable[which.min(m1_rpart$cptable[, 4]), 1]
-cp_star
+log(cp_star)
 ```
 
 Let us plot the optimal tree
@@ -280,7 +313,7 @@ rpart.plot(m2_rpart, type = 5, extra = 101, under = FALSE, fallen.leaves = TRUE,
     digits = 3, cex = 0.60)
 ```
 
-There is a possibility to extract a variable importance metric.
+There is a possibility to extract a variable importance metric (corresponding to the "gains" made on the loss function by each variable)
 
 ```{r}
 plotdata = data.frame(m2_rpart$variable.importance)
@@ -310,6 +343,27 @@ If we compute the deviance on the full tree (not the pruned tree), we obtain
 ```{r}
 deviance_poisson(x_obs = testing_set$ClaimNb, x_pred = predict(m1_rpart, testing_set) *
     testing_set$Exposure)
+```
+
+# Instability of trees
+
+To illustrate the sensitivity of trees to the data, let us compare
+- one tree derived from the whole training set
+- a similarly constructed tree from a random subsample (~ 1/3) of the whole training set
+
+```{r}
+rpart(cbind(Exposure, ClaimNb) ~ Power + CarAge + DriverAge + Brand + Gas + Region + Density, 
+          data = training_set, 
+          method = "poisson", 
+          control = rpart.control(cp=0, maxdepth=2, xval = 0))
+```
+
+```{r}
+set.seed(5)
+rpart(cbind(Exposure, ClaimNb) ~ Power + CarAge + DriverAge + Brand + Gas + Region + Density, 
+          data = training_set[sample(1:nrow(training_set), 100000, replace=FALSE),], 
+          method = "poisson", 
+          control = rpart.control(cp=0, maxdepth=2, xval = 0))
 ```
 
 ## Bagging of trees
